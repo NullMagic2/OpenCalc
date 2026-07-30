@@ -90,6 +90,8 @@ pub fn install_classic_separator_painter(_hwnd: *mut c_void) {}
 
 pub fn install_classic_vertical_separator_painter(_hwnd: *mut c_void) {}
 
+pub fn make_pointer_passthrough(_hwnd: *mut c_void) {}
+
 pub fn install_classic_button_painter(
     _hwnd: *mut c_void,
     _red: u8,

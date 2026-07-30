@@ -34,6 +34,8 @@ pub(super) fn build_history_separator<W: WxWidget>(
 
 pub(super) fn style_history_text(_text: &TextCtrl) {}
 
+pub(super) fn style_graph_expression(_expression: &TextCtrl) {}
+
 pub(super) fn make_separator_line(parent: &Panel, y: i32, width: i32) {
     let line = StaticBox::builder(parent)
         .with_label("")
@@ -76,6 +78,19 @@ pub(super) fn position_splitter(
 
 pub(super) fn splitter_style() -> SplitterWindowStyle {
     SplitterWindowStyle::Vertical
+}
+
+
+pub(super) fn history_leading_gutter() -> i32 {
+    0
+}
+
+pub(super) fn history_sash_extent() -> i32 {
+    0
+}
+
+pub(super) fn history_uses_native_sash() -> bool {
+    false
 }
 
 pub(super) fn history_separator_width() -> i32 {

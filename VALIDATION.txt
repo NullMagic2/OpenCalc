@@ -1,4 +1,4 @@
-v1.1.10 buildfix85
+v1.1.10 buildfix88
 
 Original executable audit
 -------------------------
@@ -748,11 +748,38 @@ NOT RUN HERE: authoritative Cargo compilation and live wxGTK window-manager inte
 
 Buildfix85 Linux separator and group-frame validation
 ------------------------------------------------------
-PASS (source review): Linux creates the History decoration as a splitter-level custom drag handle, covering the desktop-themed native sash instead of leaving the warm RGB(205,199,194) strip visible.
-PASS (source review): the visible Linux History handle captures pointer input and persists bounded History widths on release, so covering the native sash does not remove pane resizing.
-PASS: Linux requests wxDragon's ThinSash only underneath the custom handle; Windows and fallback frontends retain their previous Vertical splitter style.
+PASS (historical buildfix85 review): Linux introduced a splitter-level neutral History decoration that covered the desktop-themed warm strip. Buildfix86 retains the decoration but restores native sash input underneath it.
+PASS (historical buildfix85 review): the temporary custom History drag handler has been superseded by buildfix86's pointer-transparent overlay and native wxSplitterWindow sash.
+PASS (historical buildfix85 review): ThinSash was used underneath the custom handle; buildfix86 restores the normal Linux native sash while Windows and fallback styles remain unchanged.
 PASS: Linux splitter and separator GTK styles use the exact neutral #f0f0f0 face, with the etched dark/light rule matching the Graph boundary.
 PASS: Linux selector/command group rectangles now use one 1px etched border with no second inset black top/left band, making the upper edge the same thickness as the remaining edges.
 PASS: Windows frontend and classic group-box painter behavior are unchanged.
 PASS: tools/check_platform_separation.py accepts matching backend facades; tools/check_rust_delimiters.py accepts all Rust source files.
 NOT RUN HERE: authoritative Cargo compilation and live wxGTK rendering/drag test; this execution environment has no Rust toolchain or wxWidgets/GTK development packages.
+
+
+Buildfix86 native sash, Statistics input/toggle, and Graph focus validation
+--------------------------------------------------------------------------
+PASS (source review): Linux uses a normal native wxSplitterWindow sash again; the neutral etched History decoration is pointer-transparent and centered over the sash, while the shared sash-change handler persists the bounded History width.
+PASS: gtk_widget_set_sensitive is available in the GTK3 runtime used for static validation; the Linux pointer-passthrough facade fixes decoration opacity at 1 and leaves the exact #f0f0f0 face unchanged.
+PASS (source review): the Statistics frame, panel, and focusable list box all receive the shared Calculator character handler, so calculator keys are routed while Statistics is active on Windows and Linux.
+PASS (source review): Sta removes the cached Statistics record before destroying the native frame, returns focus to Calculator, and creates a fresh centered frame on the next toggle without clearing Calculator.stats.
+PASS (source review): Graph visibility no longer calls set_focus on the Function editor; the frame remains the keyboard target until the user directly focuses the editable field.
+PASS (source review): Linux applies square classic display CSS to the editable Function field while Windows retains the native square wxMSW EDIT chrome and caret/selection painting.
+PASS: tools/check_platform_separation.py accepts matching UI/platform/locale backend facades; tools/check_rust_delimiters.py accepts all Rust source files.
+PASS: build.sh and clean-linux.sh pass shell syntax checks.
+NOT RUN HERE: authoritative Cargo compilation and live wxMSW/wxGTK interaction tests; package installation for the local Rust/wxWidgets toolchain did not complete in this artifact environment.
+
+Buildfix87 review:
+PASS (static): Linux frontend selects the native History sash and adds a Linux-only leading gutter/sash extent; Windows and fallback policies return zero/false.
+PASS (static): Linux GTK CSS keeps the sash surface at #f0f0f0, adds an 8px native hit target, and paints a centered dark/light etched rule.
+PASS (static): shared sizing includes the Linux-only gutter and native sash extent while the recovered Standard/Scientific child panels retain their original dimensions.
+PASS (static): History sash-change normalization uses the same platform-specific canonical Calculator-pane width as the layout path.
+
+Buildfix88 Windows embedded-resource path validation
+----------------------------------------------------
+PASS: src/platform/windows.rs embeds the project-root calc95.ico with `include_bytes!("../../calc95.ico")`; from the refactored module directory this resolves to the existing `win95_calc_rust/calc95.ico`.
+PASS: the stale `include_bytes!("../calc95.ico")` spelling is absent, so Windows no longer searches for the nonexistent `src/calc95.ico`.
+PASS: tools/check_platform_separation.py now scans every Rust source file, including target-gated backends, and fails when a literal include_bytes!/include_str! path does not resolve relative to its source file.
+PASS: platform-separation validation, Rust delimiter validation, Python syntax validation, Linux shell syntax checks, source-manifest verification, and ZIP integrity testing completed successfully.
+NOT RUN HERE: authoritative wxMSW compilation and runtime smoke test; this environment does not provide a Windows Rust/wxWidgets toolchain.

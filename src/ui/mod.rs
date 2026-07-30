@@ -66,9 +66,10 @@ const SCI_H: i32 = dp(304);
 // Optional calculation-history pane.  Buildfix40 makes this a genuine child
 // pane of wxSplitterWindow rather than a second top-level frame.  The recovered
 // Calculator controls stay in a fixed-size left host while History occupies the
-// right pane. Windows uses the native non-live sash; Linux covers the themed
-// sash with its own etched drag handle. On release both paths resize History and
-// restore the Calculator pane to its exact recovered width.
+// right pane. Both native frontends use the real non-live sash. Windows keeps
+// its established pointer-transparent decoration; Linux styles and exposes the
+// native GTK sash itself so dragging cannot be blocked. On release both paths
+// resize History and restore the Calculator pane exactly.
 const HISTORY_MARGIN: i32 = dp(8);
 const HISTORY_HEADER_H: i32 = dp(18);
 const HISTORY_BUTTON_W: i32 = dp(94);
@@ -292,9 +293,20 @@ pub fn run() -> Result<(), String> {
             MAX_HISTORY_WIDTH,
         ));
         let initial_graph_width = if settings.graph_visible { GRAPH_W } else { 0 };
-        let initial_splitter_width = STD_W
+        let initial_history_gutter = if settings.history_visible {
+            frontend::history_leading_gutter()
+        } else {
+            0
+        };
+        let initial_sash_extent = if settings.history_visible {
+            frontend::history_sash_extent()
+        } else {
+            0
+        };
+        let initial_calculator_pane_width = STD_W + initial_history_gutter;
+        let initial_splitter_width = initial_calculator_pane_width
             + if settings.history_visible {
-                initial_history_width
+                initial_sash_extent + initial_history_width
             } else {
                 0
             };
@@ -354,7 +366,7 @@ pub fn run() -> Result<(), String> {
 
         let calculator_host = Panel::builder(&splitter)
             .with_pos(Point::new(0, 0))
-            .with_size(Size::new(STD_W, STD_H))
+            .with_size(Size::new(initial_calculator_pane_width, STD_H))
             .build();
         calculator_host.set_font(&font);
         frontend::apply_surface(&calculator_host);
@@ -401,7 +413,10 @@ pub fn run() -> Result<(), String> {
 
         let history_split = if settings.history_visible {
             history_panel.panel.show(true);
-            let sash = platform::scale_classic_control_metric(splitter.get_handle(), STD_W);
+            let sash = platform::scale_classic_control_metric(
+                splitter.get_handle(),
+                initial_calculator_pane_width,
+            );
             splitter.split_vertically(&calculator_host, &history_panel.panel, sash)
         } else {
             history_panel.panel.show(false);
@@ -780,11 +795,14 @@ fn build_history_panel<W: WxWidget>(
     platform::install_context_help_dismissal(panel.get_handle());
 
     // wxSplitterWindow's native sash can blend into the pane face or inherit
-    // a desktop-theme colour. Frontend policy supplies the visible etched rule:
-    // Windows centres it over the native sash, while Linux uses a wider custom
-    // drag handle that completely covers wxGTK's warm themed sash.
+    // a desktop-theme colour. Windows keeps the established visible overlay;
+    // Linux styles the real GTK sash directly and leaves this decoration hidden
+    // so native hit-testing and drag feedback remain fully functional.
     let separator = frontend::build_history_separator(parent, &panel, height);
     platform::install_classic_vertical_separator_painter(separator.get_handle());
+    // Where this overlay is shown, it is decoration only. Pointer input must
+    // reach the real wxSplitterWindow sash underneath. Linux does not show it.
+    platform::make_pointer_passthrough(separator.get_handle());
     separator.show(false);
 
     // Keep the side pane deliberately plain: a small native heading, a
@@ -885,6 +903,7 @@ fn build_graph_panel<W: WxWidget>(
     expression.set_font(font);
     frontend::apply_classic_theme(&expression);
     expression.set_background_color(WHITE);
+    frontend::style_graph_expression(&expression);
 
     let plot_button = Button::builder(&panel)
         .with_label(strings.graph_plot())
@@ -1574,7 +1593,9 @@ fn set_graph_visible(ui: &Rc<Ui>, visible: bool) {
     let mode = ui.calc.borrow().mode;
     sync_mode_surface(ui, mode);
     if visible {
-        ui.graph_panel.expression.set_focus();
+        // Showing Graph must not implicitly turn the Function field into the
+        // keyboard target. It receives focus naturally only when clicked.
+        ui.frame.set_focus();
         ui.graph_panel.canvas.refresh(true, None);
     }
     persist_settings(ui);
@@ -1981,7 +2002,7 @@ fn perform(ui: &Rc<Ui>, action: Action) {
             return;
         }
         Action::StatsOpen => {
-            open_stats_box(ui);
+            toggle_stats_box(ui);
             return;
         }
         _ => {}
@@ -2086,8 +2107,23 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
     let graph_visible = ui.settings.borrow().graph_visible;
     let (calculator_width, height) = mode_surface_size(mode);
     let history_width = configured_history_width(ui);
-    let splitter_width = calculator_width
-        + if history_visible { history_width } else { 0 };
+    let history_gutter = if history_visible {
+        frontend::history_leading_gutter()
+    } else {
+        0
+    };
+    let sash_extent = if history_visible {
+        frontend::history_sash_extent()
+    } else {
+        0
+    };
+    let calculator_pane_width = calculator_width + history_gutter;
+    let splitter_width = calculator_pane_width
+        + if history_visible {
+            sash_extent + history_width
+        } else {
+            0
+        };
     let graph_panel_width = ui.graph_width.get().clamp(GRAPH_MIN_W, GRAPH_MAX_W);
     let graph_width = if graph_visible { graph_panel_width } else { 0 };
     let total_width = graph_width + splitter_width;
@@ -2176,8 +2212,9 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
 
     if history_visible {
         ui.history_panel.panel.show(true);
-        ui.history_panel.separator.show(true);
-        let sash = splitter_metric(ui, calculator_width);
+        let use_native_sash = frontend::history_uses_native_sash();
+        ui.history_panel.separator.show(!use_native_sash);
+        let sash = splitter_metric(ui, calculator_pane_width);
         if !ui.history_split.get() {
             if ui
                 .splitter
@@ -2189,9 +2226,12 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
         if ui.history_split.get() {
             ui.splitter.set_sash_position(sash, true);
         }
-        // Splitting can reorder native children; keep the custom boundary above
-        // both panes so it fully covers wxGTK's themed sash.
-        ui.history_panel.separator.raise();
+        // Windows retains its custom pointer-transparent boundary painter.
+        // Linux exposes the real, CSS-neutral GTK sash so native hit-testing and
+        // drag feedback cannot be blocked by a child decoration.
+        if !use_native_sash {
+            ui.history_panel.separator.raise();
+        }
     }
 
     // wxSplitterWindow owns calculator_host's rectangle.  Only the active
@@ -2239,7 +2279,10 @@ fn accept_history_sash_change(ui: &Rc<Ui>) {
 
     let mode = ui.calc.borrow().mode;
     let (calculator_width, _) = mode_surface_size(mode);
-    let canonical_sash = splitter_metric(ui, calculator_width);
+    let canonical_sash = splitter_metric(
+        ui,
+        calculator_width + frontend::history_leading_gutter(),
+    );
     let actual_sash = ui.splitter.sash_position();
     if actual_sash <= 0 || actual_sash == canonical_sash {
         return;
@@ -3091,26 +3134,27 @@ struct StatsBox {
     count: StaticText,
 }
 
-fn open_stats_box(ui: &Rc<Ui>) {
-    let newly_created = if ui.stats_box.borrow().is_none() {
-        let built = build_stats_box(ui);
-        *ui.stats_box.borrow_mut() = Some(built);
-        true
-    } else {
-        false
-    };
-
-    // Center only a newly-created Statistics Box. Closing it drops the cached
-    // window, so reopening creates a fresh box and centers it again. Once open,
-    // Calculator clicks, activation, movement and resizing preserve its position.
-    if newly_created {
-        center_stats_box(ui);
+fn toggle_stats_box(ui: &Rc<Ui>) {
+    // Sta is a true toggle on every frontend. Take the record first, then
+    // destroy the native utility so no stale window handle remains cached.
+    let existing = { ui.stats_box.borrow_mut().take() };
+    if let Some(stats) = existing {
+        stats.frame.destroy();
+        ui.frame.raise();
+        ui.frame.set_focus();
+        return;
     }
+
+    let built = build_stats_box(ui);
+    *ui.stats_box.borrow_mut() = Some(built);
+
+    // A newly-created box is centered once. Later owner activation, movement,
+    // pane resizing, and mode changes preserve the position chosen by the user.
+    center_stats_box(ui);
 
     if let Some(stats) = ui.stats_box.borrow().as_ref() {
         stats.frame.show(true);
         stats.frame.raise();
-
         frontend::focus_statistics(ui, stats);
     }
     set_statistics_application_active(ui, true);
@@ -3257,6 +3301,15 @@ fn build_stats_box(ui: &Rc<Ui>) -> StatsBox {
         .build();
     list.set_font(&font);
 
+    // CALC.EXE's accelerator loop continued to process Calculator input while
+    // the modeless Statistics dialog was active. wx events are focus-local, so
+    // bind the same calculator handler to the utility and its focusable list on
+    // both Windows and Linux. Handled keys stop here; unhandled list navigation
+    // still follows the native control path.
+    frame.on_char(calculator_char_handler(Rc::clone(ui)));
+    panel.on_char(calculator_char_handler(Rc::clone(ui)));
+    list.on_char(calculator_char_handler(Rc::clone(ui)));
+
     let make_button = |label: &str, dlu_x: i32| {
         let button = Button::builder(&panel)
             .with_label(label)
@@ -3333,6 +3386,8 @@ fn build_stats_box(ui: &Rc<Ui>) -> StatsBox {
         let ui_c = Rc::clone(ui);
         frame.on_close(move |event| {
             *ui_c.stats_box.borrow_mut() = None;
+            ui_c.frame.raise();
+            ui_c.frame.set_focus();
             event.skip(true);
         });
     }

@@ -35,6 +35,7 @@ unsafe extern "C" {
         priority: u32,
     );
     fn gtk_widget_set_name(widget: GtkWidget, name: *const c_char);
+    fn gtk_widget_set_sensitive(widget: GtkWidget, sensitive: i32);
     fn gtk_widget_queue_draw(widget: GtkWidget);
     fn gtk_widget_get_window(widget: GtkWidget) -> GdkWindow;
     fn gtk_widget_get_realized(widget: GtkWidget) -> i32;
@@ -176,6 +177,24 @@ background-color: #f0f0f0;
 border: 0;
 box-shadow: none;
 }
+#calc95_splitter > separator {
+background-color: #f0f0f0;
+background-image: linear-gradient(
+    to right,
+    #f0f0f0 0,
+    #f0f0f0 3px,
+    #808080 3px,
+    #808080 4px,
+    #ffffff 4px,
+    #ffffff 5px,
+    #f0f0f0 5px,
+    #f0f0f0 100%
+);
+border: 0;
+box-shadow: none;
+min-width: 8px;
+padding: 0;
+}
 
 #calc95_separator {
 background-image: none;
@@ -194,6 +213,7 @@ border: 0;
 border-left: 1px solid #808080;
 box-shadow: inset 1px 0 0 0 #ffffff;
 min-width: 2px;
+opacity: 1;
 padding: 0;
 }
 "#;
@@ -507,6 +527,18 @@ pub fn install_classic_vertical_separator_painter(hwnd: *mut c_void) {
     apply_classic_name(hwnd, "calc95_vertical_separator");
 }
 
+
+pub fn make_pointer_passthrough(hwnd: *mut c_void) {
+    unsafe {
+        if !hwnd.is_null() {
+            // An insensitive GTK child is skipped as an input target and the
+            // pointer event continues to the wxSplitterWindow underneath. CSS
+            // fixes opacity at 1, so the neutral etched decoration is unchanged.
+            gtk_widget_set_sensitive(hwnd as GtkWidget, 0);
+        }
+    }
+}
+
 pub fn install_classic_button_painter(
     hwnd: *mut c_void,
     red: u8,
@@ -680,6 +712,23 @@ mod tests {
             .expect("splitter CSS block");
         assert!(splitter.contains("background-color: #f0f0f0;"));
         assert!(splitter.contains("box-shadow: none;"));
+
+        let sash = CLASSIC_GTK_CSS
+            .split("#calc95_splitter > separator {")
+            .nth(1)
+            .and_then(|tail| tail.split('}').next())
+            .expect("native sash CSS block");
+        assert!(sash.contains("background-color: #f0f0f0;"));
+        assert!(sash.contains("linear-gradient"));
+        assert!(sash.contains("min-width: 8px;"));
+        assert!(sash.contains("box-shadow: none;"));
+
+        let decoration = CLASSIC_GTK_CSS
+            .split("#calc95_vertical_separator {")
+            .nth(1)
+            .and_then(|tail| tail.split('}').next())
+            .expect("separator decoration CSS block");
+        assert!(decoration.contains("opacity: 1;"));
     }
 
     #[test]

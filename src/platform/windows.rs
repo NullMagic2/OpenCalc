@@ -1391,6 +1391,11 @@ pub fn install_classic_vertical_separator_painter(hwnd: *mut c_void) {
     }
 }
 
+pub fn make_pointer_passthrough(_hwnd: *mut c_void) {
+    // The Windows vertical-separator subclass already returns HTTRANSPARENT
+    // from WM_NCHITTEST, so splitter input naturally reaches the native sash.
+}
+
 unsafe fn draw_classic_group_box(hwnd: Hwnd, hdc: Hdc) {
     let mut rect = Rect::default();
     if GetClientRect(hwnd, &mut rect) == 0 {
@@ -2106,7 +2111,7 @@ pub fn enable_modern_dpi_awareness() {
 }
 
 fn embedded_icon_image(width: u8) -> Option<&'static [u8]> {
-    let ico = include_bytes!("../calc95.ico");
+    let ico = include_bytes!("../../calc95.ico");
     if ico.len() < 6 || &ico[0..4] != [0, 0, 1, 0] {
         return None;
     }

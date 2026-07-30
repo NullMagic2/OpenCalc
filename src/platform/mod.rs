@@ -29,6 +29,7 @@ pub use imp::{
     install_classic_separator_painter, install_classic_splitter_painter,
     install_classic_sunken_field_painter,
     install_classic_vertical_separator_painter, install_companion_activation_guard,
+    make_pointer_passthrough,
     install_context_help, install_context_help_dismissal, install_selector_notifier,
     install_window_state_notifier, is_button_checked, message, paste_text,
     position_statistics_companion, pulse_classic_button, scale_classic_control_metric,

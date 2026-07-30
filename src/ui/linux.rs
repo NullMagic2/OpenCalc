@@ -1,8 +1,9 @@
 //! Linux-only wxGTK frontend policy.
 //!
 //! Shared calculator behavior and recovered geometry live in `mod.rs`.  This
-//! module owns the neutral RGB(240,240,240) surface, Linux font choice, GTK-safe sash
-//! decoration, exact client resizing, draggable Linux panes, modal dialogs, and Statistics focus policy.
+//! module owns the neutral RGB(240,240,240) surface, Linux font choice,
+//! GTK-safe sash decoration, exact client resizing, draggable Linux panes,
+//! modal dialogs, and Statistics focus policy.
 
 use super::*;
 use wxdragon::dialogs::message_dialog::{MessageDialog, MessageDialogStyle};
@@ -32,10 +33,9 @@ pub(super) fn build_history_separator<W: WxWidget>(
     _panel: &Panel,
     height: i32,
 ) -> StaticText {
-    // wxGTK paints its native splitter sash with the desktop theme, producing
-    // a warm grey strip beside the neutral OpenCalc surface. Cover it with the
-    // same custom etched handle used by the Graph pane. The Linux resize policy
-    // below owns dragging this overlay, so the native sash need not stay visible.
+    // Linux now styles and exposes wxGTK's native sash directly. Retain the
+    // cross-platform decoration object for the shared HistoryPanel contract,
+    // but sync_mode_surface() keeps this child hidden on Linux.
     StaticText::builder(parent)
         .with_label("")
         .with_pos(Point::new(0, 0))
@@ -45,6 +45,12 @@ pub(super) fn build_history_separator<W: WxWidget>(
 
 pub(super) fn style_history_text(text: &TextCtrl) {
     platform::install_classic_display_painter(text.get_handle());
+}
+
+pub(super) fn style_graph_expression(expression: &TextCtrl) {
+    // Reuse the square classic editable chrome while leaving the native GTK
+    // entry in charge of text, selection, caret, and mouse focus.
+    platform::install_classic_display_painter(expression.get_handle());
 }
 
 pub(super) fn make_separator_line(parent: &Panel, y: i32, width: i32) {
@@ -103,17 +109,35 @@ pub(super) fn position_splitter(
 }
 
 pub(super) fn splitter_style() -> SplitterWindowStyle {
-    // Leave only the thinnest native sash underneath the custom Linux handle.
-    // Windows retains its established native splitter style unchanged.
-    SplitterWindowStyle::Vertical | SplitterWindowStyle::ThinSash
+    // Keep the real native GTK sash as both the visible separator and the drag
+    // target. Platform CSS supplies the exact neutral face and etched rule.
+    SplitterWindowStyle::Vertical
+}
+
+
+pub(super) fn history_leading_gutter() -> i32 {
+    // Preserve the recovered Calculator geometry while adding a small neutral
+    // buffer before the native GTK sash. This prevents the final keypad column
+    // from visually colliding with History without changing Windows.
+    dp(8)
+}
+
+pub(super) fn history_sash_extent() -> i32 {
+    // Matches the GTK CSS minimum width below. The sash itself remains the real
+    // wxSplitterWindow drag target rather than a decorative child overlay.
+    dp(6)
+}
+
+pub(super) fn history_uses_native_sash() -> bool {
+    true
 }
 
 pub(super) fn history_separator_width() -> i32 {
     graph_separator_width()
 }
 
-pub(super) fn history_separator_x(sash_position: i32, _separator_width: i32) -> i32 {
-    sash_position.max(0)
+pub(super) fn history_separator_x(sash_position: i32, separator_width: i32) -> i32 {
+    (sash_position - separator_width / 2).max(0)
 }
 
 pub(super) fn lock_frame_size(_frame: &Frame) {
@@ -154,9 +178,9 @@ pub(super) fn graph_separator_width() -> i32 {
 }
 
 pub(super) fn install_panel_resizing(ui: &Rc<Ui>) {
-    // Linux exposes both optional-pane separators as captured drag handles.
-    // Resize on release so the pointer delta remains relative to the original
-    // separator even while the top-level GTK allocation changes.
+    // Graph remains a captured custom handle. History uses the real native
+    // wxSplitterWindow sash so the pointer cursor and drag semantics are owned
+    // by GTK/wxWidgets rather than emulated by a decorative child.
     let drag = Rc::new(RefCell::new(None::<(i32, i32)>));
 
     {
@@ -196,55 +220,8 @@ pub(super) fn install_panel_resizing(ui: &Rc<Ui>) {
         });
     }
 
-    // The visible History separator covers wxGTK's themed native sash and owns
-    // the Linux drag interaction. Moving it right narrows History; moving it
-    // left widens History, while the Calculator surface remains fixed.
-    let history_drag = Rc::new(RefCell::new(None::<(i32, i32)>));
-    {
-        let separator = ui.history_panel.separator.clone();
-        let history_drag = Rc::clone(&history_drag);
-        let ui_c = Rc::clone(ui);
-        separator.on_mouse_left_down(move |event| {
-            if ui_c.settings.borrow().history_visible {
-                if let WindowEventData::MouseButton(mouse) = &event {
-                    if let Some(position) = mouse.get_position() {
-                        *history_drag.borrow_mut() = Some((
-                            position.x,
-                            ui_c.settings.borrow().history_width,
-                        ));
-                        separator.capture_mouse();
-                    }
-                }
-            }
-            event.skip(false);
-        });
-    }
-    {
-        let separator = ui.history_panel.separator.clone();
-        let history_drag = Rc::clone(&history_drag);
-        let ui_c = Rc::clone(ui);
-        separator.on_mouse_left_up(move |event| {
-            let start = history_drag.borrow_mut().take();
-            if separator.has_capture() {
-                separator.release_mouse();
-            }
-            if let Some((start_x, start_width)) = start {
-                if let WindowEventData::MouseButton(mouse) = &event {
-                    if let Some(position) = mouse.get_position() {
-                        let width = (start_width - (position.x - start_x))
-                            .clamp(MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH);
-                        if ui_c.settings.borrow().history_width != width {
-                            ui_c.settings.borrow_mut().history_width = width;
-                            persist_settings(&ui_c);
-                        }
-                        let mode = ui_c.calc.borrow().mode;
-                        sync_mode_surface(&ui_c, mode);
-                    }
-                }
-            }
-            event.skip(false);
-        });
-    }
+    // History deliberately uses wxSplitterWindow's visible native sash, so
+    // bind_splitter() receives the real sash release and persists its width.
 }
 
 pub(super) fn restore_main_keyboard_focus(_ui: &Ui, _active: bool) {
@@ -253,11 +230,9 @@ pub(super) fn restore_main_keyboard_focus(_ui: &Ui, _active: bool) {
 }
 
 pub(super) fn focus_statistics(ui: &Ui, stats: &StatsBox) {
-    // wxGTK cannot route Calculator accelerators through a focused secondary
-    // frame like CALC.EXE's Win32 message loop. Keep Calculator as the keyboard
-    // sink, then retain only the Statistics stacking order without activating
-    // it. The Linux backend arms an active-application above hint before the
-    // window is shown, so Calculator button presses cannot make the box dip.
+    // Start with Calculator as the keyboard sink while retaining Statistics
+    // stacking without activation. If the user later activates Statistics, the
+    // shared utility-window key handlers still route calculator accelerators.
     ui.frame.raise();
     ui.frame.set_focus();
     platform::activate_statistics_companion(stats.frame.get_handle());

@@ -20,6 +20,9 @@ LOCALE_BACKENDS = [
 
 PUB_SUPER_FN = re.compile(r"(?m)^pub\(super\)\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)")
 PUB_FN = re.compile(r"(?m)^pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)")
+INCLUDE_MACRO = re.compile(
+    r'(?m)\binclude_(?:bytes|str)!\s*\(\s*["\']([^"\']+)["\']\s*\)'
+)
 
 
 def fail(message: str) -> None:
@@ -50,10 +53,22 @@ def check_shared_file(path: Path, forbidden: tuple[str, ...]) -> None:
             fail(f"{path} contains platform-specific code outside its selector header: {token}")
 
 
+def check_literal_includes() -> None:
+    """Validate compile-time asset paths even in target-specific modules."""
+    for path in ROOT.rglob("*.rs"):
+        text = path.read_text(encoding="utf-8")
+        for literal in INCLUDE_MACRO.findall(text):
+            included = (path.parent / literal).resolve()
+            if not included.is_file():
+                fail(f"{path} references missing include asset: {literal} -> {included}")
+
+
 def main() -> int:
     for obsolete in (SRC / "ui.rs", SRC / "platform.rs", SRC / "locale.rs"):
         if obsolete.exists():
             fail(f"obsolete mixed-platform module still exists: {obsolete}")
+
+    check_literal_includes()
 
     require_same_interface(UI_BACKENDS, PUB_SUPER_FN, "UI frontend facade")
     require_same_interface(PLATFORM_BACKENDS, PUB_FN, "platform integration facade")
@@ -79,6 +94,7 @@ def main() -> int:
     print("PASS: shared UI, platform, and locale modules are target-neutral.")
     print("PASS: Windows, Linux, and fallback backends expose matching facades.")
     print("PASS: obsolete mixed-platform source files are absent.")
+    print("PASS: literal Rust include_bytes!/include_str! asset paths resolve.")
     return 0
 
 
