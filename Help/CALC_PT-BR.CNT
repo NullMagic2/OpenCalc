@@ -1,0 +1,51 @@
+:Title Ajuda OpenCalc
+:Base CALC_PT-BR.HLP
+1 Primeiros passos
+2 Ajuda OpenCalc=welcome
+2 Início rápido=quick_start
+2 Visão geral da interface=interface_overview
+3 Modo Padrão=standard_mode
+3 Modo Científico=scientific_mode
+3 Visor e indicadores de estado=display_status
+1 Cálculos padrão
+2 Digitar números=entering_numbers
+2 Back, CE, C e +/-=editing_entry
+2 Operadores aritméticos e avaliação=arithmetic
+2 Porcentagem=percent
+2 Raiz quadrada e recíproco=sqrt_recip
+2 Memória=memory
+1 Cálculos científicos
+2 Hex, Dec, Oct e Bin=bases
+2 Ângulos e trigonometria=angles_trig
+2 Inv e Hyp=inv_hyp
+2 Potências, raízes, fatoriais e logaritmos=powers_logs
+2 dms, F-E, Exp e PI=dms_fe_exp_pi
+2 Operações inteiras e bit a bit=integer_logic
+2 Parênteses e precedência=parentheses
+1 Estatística
+2 Visão geral estatística=statistics_overview
+2 Caixa de Estatística=statistics_box
+1 Histórico e edição
+2 Painel de Histórico=history_pane
+2 Recuperar e limpar Histórico=history_recall
+2 Desfazer e Refazer=undo_redo
+2 Copiar e Colar=clipboard
+1 Copiar e colar expressões
+2 Sintaxe ao colar=paste_syntax
+2 Funções e constantes=paste_functions
+2 Números, locais e bases=paste_numbers
+2 Exemplos de colagem e gráfico=paste_examples
+1 Preferências e Ajuda
+2 Idioma da interface=language
+2 Separador decimal=decimal_separator
+2 Arquivo de configuração=settings_file
+2 Atalhos de teclado=keyboard
+2 Ajuda O que é isto?=context_help
+2 Ajuda localizada e visualizador HLP=help_files
+1 Erros e referência
+2 Mensagens de erro da Calculadora=errors
+2 Solução de problemas=troubleshooting
+2 Referência dos botões Padrão=standard_buttons
+2 Referência dos botões Científicos=scientific_buttons
+2 O que persiste e o que não persiste=state_lifetimes
+2 Notas importantes de comportamento=behavior_notes

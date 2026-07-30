@@ -1,47 +1,565 @@
-@echo off
-setlocal
-where cargo >nul 2>nul
-if errorlevel 1 (
-  echo Rust/Cargo was not found in PATH.
-  echo Install Rust from https://rustup.rs and run this file again.
-  exit /b 1
-)
+# Windows 95 Calculator context help — localized catalog
+#
+# Portuguese source text was decoded from the supplied Windows 95 CALC.HLP
+# SHA-256: 25ebb11326406561f210c96ad03c7b35d3fc6cf0deee3958efc699e5bec47103
+# English and Spanish entries are translations of those control-help topics.
+# The decimal-separator topic is adapted to describe this reimplementation's
+# View > Decimal separator preference instead of the original Control Panel path.
+#
+# Format: [language.key] followed by one or more UTF-8 text lines.
+# Languages: en, pt, es
 
-cargo build --release
-if errorlevel 1 exit /b 1
+# --- English ---
 
-copy /Y target\release\OpenCalc.exe OpenCalc.exe >nul
+[en.clear]
+Clears the current calculation. Keyboard equivalent = ESC
 
-if exist hlp-viewer.exe (
-  copy /Y hlp-viewer.exe target\release\hlp-viewer.exe >nul
-)
+[en.ce]
+Clears the displayed number. Keyboard equivalent = DEL
 
-for %%F in (CALC.HLP CALC.CNT CALP.HLP CALP.CNT CALS.HLP CALS.CNT) do (
-  if exist target\release\%%F del /q target\release\%%F
-)
+[en.back]
+Deletes the last digit of the displayed number. Keyboard equivalent = BACKSPACE
 
-if exist target\release\Help rmdir /S /Q target\release\Help
-mkdir target\release\Help
-if exist Help\CALC_EN.HLP copy /Y Help\CALC_EN.HLP target\release\Help\CALC_EN.HLP >nul
-if exist Help\CALC_EN.CNT copy /Y Help\CALC_EN.CNT target\release\Help\CALC_EN.CNT >nul
-if exist Help\CALC_PT-BR.HLP copy /Y Help\CALC_PT-BR.HLP target\release\Help\CALC_PT-BR.HLP >nul
-if exist Help\CALC_PT-BR.CNT copy /Y Help\CALC_PT-BR.CNT target\release\Help\CALC_PT-BR.CNT >nul
-if exist Help\CALC_ES.HLP copy /Y Help\CALC_ES.HLP target\release\Help\CALC_ES.HLP >nul
-if exist Help\CALC_ES.CNT copy /Y Help\CALC_ES.CNT target\release\Help\CALC_ES.CNT >nul
-if exist calc.tooltip copy /Y calc.tooltip target\release\calc.tooltip >nul
+[en.reciprocal]
+Calculates the reciprocal of the displayed number. Keyboard equivalent = r
 
-echo Built OpenCalc.exe with the embedded calc95.ico resource
-if exist hlp-viewer.exe echo Included companion hlp-viewer.exe
-if exist Help\CALC_EN.HLP echo Included English Help\CALC_EN.HLP
-if exist Help\CALC_EN.CNT echo Included English Help\CALC_EN.CNT
-if exist Help\CALC_PT-BR.HLP echo Included Portuguese Help\CALC_PT-BR.HLP
-if exist Help\CALC_PT-BR.CNT echo Included Portuguese Help\CALC_PT-BR.CNT
-if exist Help\CALC_ES.HLP echo Included Spanish Help\CALC_ES.HLP
-if exist Help\CALC_ES.CNT echo Included Spanish Help\CALC_ES.CNT
-if exist calc.tooltip echo Included calc.tooltip context-help catalog
-if not exist Help\CALC_EN.HLP echo Note: English Help\CALC_EN.HLP is missing.
-if not exist Help\CALC_PT-BR.HLP echo Note: Portuguese Help\CALC_PT-BR.HLP is missing; OpenCalc will fall back to English.
-if not exist Help\CALC_ES.HLP echo Note: Spanish Help\CALC_ES.HLP is missing; OpenCalc will fall back to English.
-if not exist Help\CALC_EN.CNT echo Note: Help\CALC_EN.CNT is optional, but required for the English Help contents hierarchy.
-if not exist Help\CALC_PT-BR.CNT echo Note: Help\CALC_PT-BR.CNT is optional, but required for the Portuguese Help contents hierarchy.
-if not exist Help\CALC_ES.CNT echo Note: Help\CALC_ES.CNT is optional, but required for the Spanish Help contents hierarchy.
+[en.mc]
+Clears any number stored in memory. Keyboard equivalent = CTRL+L
+
+[en.mr]
+Recalls the number stored in memory. The number remains in memory. Keyboard equivalent = CTRL+R
+
+[en.ms]
+Stores the displayed number in memory. Keyboard equivalent = CTRL+M
+
+[en.mplus]
+Adds the displayed number to the number already in memory. Keyboard equivalent = CTRL+P
+
+[en.display]
+Displays each number as you type it, then displays the result of the calculation.
+
+[en.digit]
+Places this number in the calculator display. Keyboard equivalent = 0-9
+
+[en.sign]
+Changes the sign of the displayed number. Keyboard equivalent = F9
+
+[en.decimal_point]
+Inserts a decimal separator. You can choose a period or comma under View > Decimal separator. Keyboard equivalent = . or ,
+
+[en.divide]
+Divides. Keyboard equivalent = /
+
+[en.multiply]
+Multiplies. Keyboard equivalent = *
+
+[en.subtract]
+Subtracts. Keyboard equivalent = -
+
+[en.add]
+Adds. Keyboard equivalent = +
+
+[en.sqrt]
+Calculates the square root of the displayed number. Keyboard equivalent = @
+
+[en.percent]
+Displays the result of multiplication as a percentage. Type a number, click *, click the second number, and then click %. If you use any operator other than *, the calculator assumes you meant * and multiplies the numbers. Keyboard equivalent = %
+
+[en.equals]
+Performs the pending operation on the two preceding numbers. To repeat the last operation, click again. Keyboard equivalent = ENTER
+
+[en.hex]
+Converts the displayed number to the hexadecimal number system. The maximum unsigned hexadecimal value is a 32-bit expression in which all bits are set to 1; for example, 0xFFFFFFFF. Keyboard equivalent = F5
+
+[en.dword]
+Displays the complete 32-bit representation of the displayed number. Keyboard equivalent = F2
+
+[en.word]
+Displays the low-order 16 bits of the current number. Keyboard equivalent = F3
+
+[en.byte]
+Displays the low-order 8 bits of the current number. Keyboard equivalent = F4
+
+[en.dec]
+Converts the displayed number to the decimal number system. The range of decimal numbers is -9.9999999999999e-307 to 9.9999999999999e+307. Keyboard equivalent = F6
+
+[en.oct]
+Converts the displayed number to the octal number system. The maximum unsigned octal value is a 32-bit expression in which all bits are set to 1; for example, 037777777777. Keyboard equivalent = F7
+
+[en.bin]
+Converts the displayed number to the binary number system. The maximum unsigned binary value is a 32-bit expression in which all bits are set to 1. Keyboard equivalent = F8
+
+[en.deg]
+Sets trigonometric input to degrees when in decimal mode. Keyboard equivalent = F2
+
+[en.rad]
+Sets trigonometric input to radians when in decimal mode. Keyboard equivalent = F6
+
+[en.grad]
+Sets trigonometric input to grads when in decimal mode. Keyboard equivalent = F4
+
+[en.pi]
+Displays the value of pi (3.1415...). To display 2 * pi (6.28...), use Inv+PI. Keyboard equivalent = p
+
+[en.inv]
+Sets the inverse function for sin, cos, tan, PI, x^y, x^2, x^3, ln, log, Ave, Sum, and s. Functions automatically turn off the inverse setting after the calculation is complete. Keyboard equivalent = i
+
+[en.hyp]
+Sets the hyperbolic function for sin, cos, and tan. Functions automatically turn off the hyperbolic setting after the calculation is complete. Keyboard equivalent = h
+
+[en.sta]
+Click here to open the Statistics Box and enable the Ave, Sum, s, and Dat buttons. Keyboard equivalent = CTRL+S
+
+[en.ave]
+Calculates the average of the values displayed in the Statistics Box. To calculate the average of the squares, use Inv+Ave. This button is available only after you click Sta. Keyboard equivalent = CTRL+A
+
+[en.sum]
+Calculates the sum of the values displayed in the Statistics Box. To calculate the sum of the squares, use Inv+Sum. This button is available only after you click Sta. Keyboard equivalent = CTRL+T
+
+[en.stddev]
+Calculates the standard deviation using the n-1 population parameter. To calculate the standard deviation using the n population parameter, use Inv+s. This button is available only after you click Sta. Keyboard equivalent = CTRL+D
+
+[en.dat]
+Enters the displayed number in the Statistics Box. This button is available only after you click Sta. Keyboard equivalent = INS
+
+[en.fe]
+Turns scientific notation on and off. Numbers greater than 10^15 are always displayed exponentially. F-E can be used only with the decimal number system. Keyboard equivalent = v
+
+[en.dms]
+Converts the displayed number to degree-minute-second format (assuming the displayed number is in degrees). To convert the displayed number to degrees (assuming it is in degree-minute-second format), use Inv+dms. Keyboard equivalent = m
+
+[en.sin]
+Calculates the sine of the displayed number. To calculate the arcsine, use Inv+sin. To calculate the hyperbolic sine, use Hyp+sin. To calculate the hyperbolic arcsine, use Inv+Hyp+sin. Keyboard equivalent = s
+
+[en.cos]
+Calculates the cosine of the displayed number. To calculate the arccosine, use Inv+cos. To calculate the hyperbolic cosine, use Hyp+cos. To calculate the hyperbolic arccosine, use Inv+Hyp+cos. Keyboard equivalent = o
+
+[en.tan]
+Calculates the tangent of the displayed number. To calculate the arctangent, use Inv+tan. To calculate the hyperbolic tangent, use Hyp+tan. To calculate the hyperbolic arctangent, use Inv+Hyp+tan. Keyboard equivalent = t
+
+[en.exp]
+Lets you enter numbers in scientific notation. The upper exponent limit is +289. You can continue typing numbers as long as you use only the 0 through 9 keys. Exp can be used only with the decimal number system. Keyboard equivalent = x
+
+[en.pow]
+Calculates x raised to the yth power. To calculate the yth root of x, use Inv+x^y. Keyboard equivalent = y
+
+[en.cube]
+Cubes the displayed number. To calculate the cube root, use Inv+x^3. Keyboard equivalent = #
+
+[en.square]
+Squares the displayed number. To calculate the square root, use Inv+x^2. Keyboard equivalent = @
+
+[en.ln]
+Calculates the natural logarithm (base e). To calculate e raised to the xth power, where x is the current number, use Inv+ln. Keyboard equivalent = n
+
+[en.log]
+Calculates the common logarithm (base 10). To calculate 10 raised to the xth power, use Inv+log. Keyboard equivalent = l
+
+[en.factorial]
+Calculates the factorial of the displayed number. Keyboard equivalent = !
+
+[en.open_paren]
+Starts a new level of parentheses. The current number of levels appears in the box above the ) button. The maximum number of levels is 25. Keyboard equivalent = (
+
+[en.close_paren]
+Closes the current level of parentheses. Keyboard equivalent = )
+
+[en.mod]
+Displays the modulus, or remainder, of x/y. Keyboard equivalent = %
+
+[en.or]
+Calculates the bitwise OR. Keyboard equivalent = |
+
+[en.lsh]
+Shifts left. To shift right, use Inv+Lsh. After clicking this button, specify (in binary) how many positions you want to shift the number in the display left or right, and then click =. Keyboard equivalent = <
+
+[en.and]
+Calculates the bitwise AND. Keyboard equivalent = &
+
+[en.xor]
+Calculates the bitwise exclusive OR. Keyboard equivalent = ^
+
+[en.not]
+Calculates the bitwise inverse. Keyboard equivalent = ~
+
+[en.int]
+Displays the integer part of a decimal value. To display the fractional part of a decimal value, use Inv+Int. Keyboard equivalent = ;
+
+[en.hex_digit]
+Enters the selected letter in the value. This button is available only when hexadecimal mode is enabled. Keyboard equivalent = A-F
+
+[en.memory_indicator]
+When you store a number in memory, an M appears in the box above the memory controls.
+
+[en.paren_indicator]
+The current number of parenthesis levels appears in the box above the ) button. The maximum number of levels is 25.
+
+# --- Português ---
+
+[pt.clear]
+Limpa o cálculo atual. Equivalente de teclado = ESC
+
+[pt.ce]
+Limpa o número exibido. Equivalente de teclado = DEL
+
+[pt.back]
+Exclui o último dígito do número exibido. Equivalente de teclado = BACKSPACE
+
+[pt.reciprocal]
+Calcula o recíproco do número exibido. Equivalente de teclado = r
+
+[pt.mc]
+Limpa qualquer número armazenado na memória. Equivalente de teclado = CTRL+L
+
+[pt.mr]
+Chama o número armazenado na memória. Esse número permanece na memória. Equivalente de teclado = CTRL+R
+
+[pt.ms]
+Armazena na memória o número exibido. Equivalente de teclado = CTRL+M
+
+[pt.mplus]
+Soma o número exibido ao número que já está na memória. Equivalente de teclado = CTRL+P
+
+[pt.display]
+Exibe cada número enquanto é digitado; em seguida, exibe o resultado do cálculo.
+
+[pt.digit]
+Coloca esse número no visor da calculadora. Equivalente de teclado = 0-9
+
+[pt.sign]
+Troca o sinal do número exibido. Equivalente de teclado = F9
+
+[pt.decimal_point]
+Insere um separador decimal. Você pode escolher ponto ou vírgula em Exibir > Separador decimal. Equivalente de teclado = . ou ,
+
+[pt.divide]
+Divide. Equivalente de teclado = /
+
+[pt.multiply]
+Multiplica. Equivalente de teclado = *
+
+[pt.subtract]
+Subtrai. Equivalente de teclado = -
+
+[pt.add]
+Soma. Equivalente de teclado = +
+
+[pt.sqrt]
+Calcula a raiz quadrada do número exibido. Equivalente de teclado = @
+
+[pt.percent]
+Exibe o resultado da multiplicação como porcentagem. Digite um número, clique em *, clique no segundo número e, em seguida, clique em %. Se você usar qualquer outro operador que não *, a calculadora supõe que você quis dizer * e multiplica os números. Equivalente de teclado = %
+
+[pt.equals]
+Executa qualquer operação com dois números anteriores. Para repetir a última operação, clique novamente. Equivalente de teclado = ENTER
+
+[pt.hex]
+Converte o número exibido para o sistema numérico hexadecimal. O valor hexadecimal máximo sem sinal é uma expressão de 32 bits em que todos eles são definidos como 1; por exemplo, 0xFFFFFFFF. Equivalente de teclado = F5
+
+[pt.dword]
+Exibe a representação de 32 bits completa do número exibido. Equivalente de teclado = F2
+
+[pt.word]
+Exibe os 16 bits inferiores do número atual. Equivalente de teclado = F3
+
+[pt.byte]
+Exibe os 8 bits inferiores do número atual. Equivalente de teclado = F4
+
+[pt.dec]
+Converte o número exibido para o sistema numérico decimal. O intervalo de números decimais é de -9.9999999999999e-307 a 9.9999999999999e+307. Equivalente de teclado = F6
+
+[pt.oct]
+Converte o número exibido para o sistema numérico octal. O valor octal máximo sem sinal é uma expressão de 32 bits em que todos eles são definidos como 1; por exemplo, 037777777777. Equivalente de teclado = F7
+
+[pt.bin]
+Converte o número exibido para o sistema numérico binário. O valor binário máximo sem sinal é uma expressão de 32 bits em que todos eles são definidos como 1. Equivalente de teclado = F8
+
+[pt.deg]
+Define a entrada trigonométrica como graus quando se está em modo decimal. Equivalente de teclado = F2
+
+[pt.rad]
+Define a entrada trigonométrica como radianos quando se está em modo decimal. Equivalente de teclado = F6
+
+[pt.grad]
+Define a entrada trigonométrica como gradientes quando se está em modo decimal. Equivalente de teclado = F4
+
+[pt.pi]
+Exibe o valor de pi (3,1415...). Para exibir 2 * pi (6,28...), use Inv+PI. Equivalente de teclado = p
+
+[pt.inv]
+Define a função inversa de sin, cos, tan, PI, x^y, x^2, x^3, ln, log, Ave, Sum e s. As funções desativam automaticamente a função inversa depois que o cálculo é concluído. Equivalente de teclado = i
+
+[pt.hyp]
+Define a função hiperbólica para sin, cos e tan. As funções desativam automaticamente a função hiperbólica depois que o cálculo é concluído. Equivalente de teclado = h
+
+[pt.sta]
+Clique aqui para abrir a Caixa de Estatística e ativar os botões "Ave", "Sum", "s" e "Dat". Equivalente de teclado = CTRL+S
+
+[pt.ave]
+Calcula a média dos valores exibidos na Caixa de Estatística. Para calcular a média dos quadrados, use Inv+Ave. Este botão só está disponível quando você clica primeiro em "Sta". Equivalente de teclado = CTRL+A
+
+[pt.sum]
+Calcula a soma dos valores exibidos na Caixa de Estatística. Para calcular a soma dos quadrados, use Inv+Sum. Este botão só está disponível quando você clica primeiro em "Sta". Equivalente de teclado = CTRL+T
+
+[pt.stddev]
+Calcula o desvio padrão com o parâmetro de população n-1. Para calcular o desvio padrão com o parâmetro de população n, use Inv+s. Este botão só está disponível quando você clica primeiro em "Sta". Equivalente de teclado = CTRL+D
+
+[pt.dat]
+Insere o número exibido na Caixa de Estatística. Este botão só está disponível quando você clica primeiro em "Sta". Equivalente de teclado = INS
+
+[pt.fe]
+Ativa e desativa a notação científica. Os números maiores que 10^15 são sempre exibidos exponencialmente. F-E só pode ser usado com o sistema numérico decimal. Equivalente de teclado = v
+
+[pt.dms]
+Converte o número exibido para o formato grau-minuto-segundo (supondo-se que o número exibido esteja em graus). Para converter o número exibido em graus (supondo-se que o número exibido esteja no formato grau-minuto-segundo), use Inv+dms. Equivalente de teclado = m
+
+[pt.sin]
+Calcula o seno do número exibido. Para calcular o arco-seno, use Inv+sin. Para calcular o seno hiperbólico, use Hyp+sin. Para calcular o arco-seno hiperbólico, use Inv+Hyp+sin. Equivalente de teclado = s
+
+[pt.cos]
+Calcula o co-seno do número exibido. Para calcular o arco-co-seno, use Inv+cos. Para calcular o co-seno hiperbólico, use Hyp+cos. Para calcular o arco-co-seno hiperbólico, use Inv+Hyp+cos. Equivalente de teclado = o
+
+[pt.tan]
+Calcula a tangente do número exibido. Para calcular o arco-tangente, use Inv+tan. Para calcular a tangente hiperbólica, use Hyp+tan. Para calcular o arco-tangente hiperbólico, use Inv+Hyp+tan. Equivalente de teclado = t
+
+[pt.exp]
+Permite digitar números em notação científica. O limite superior do expoente é de +289. Você pode continuar a digitar números, desde que só use as teclas 0 a 9. Exp só pode ser usado com o sistema numérico decimal. Equivalente de teclado = x
+
+[pt.pow]
+Calcula x elevado à yª potência. Para calcular a raiz yª de x, use Inv+x^y. Equivalente de teclado = y
+
+[pt.cube]
+Eleva ao cubo o número exibido. Para calcular a raiz cúbica, use Inv+x^3. Equivalente de teclado = #
+
+[pt.square]
+Eleva ao quadrado o número exibido. Para calcular a raiz quadrada, use Inv+x^2. Equivalente de teclado = @
+
+[pt.ln]
+Calcula o logaritmo natural (base e). Para calcular e elevado à xª potência, onde x é o número atual, use Inv+ln. Equivalente de teclado = n
+
+[pt.log]
+Calcula o logaritmo comum (base 10). Para calcular 10 elevado à xª potência, use Inv+log. Equivalente de teclado = l
+
+[pt.factorial]
+Calcula o fatorial do número exibido. Equivalente de teclado = !
+
+[pt.open_paren]
+Inicia um novo nível de parênteses. O número de níveis atual aparece na caixa acima do botão ")". O número máximo de níveis é de 25. Equivalente de teclado = (
+
+[pt.close_paren]
+Fecha o nível atual de parênteses. Equivalente de teclado = )
+
+[pt.mod]
+Exibe o módulo, ou resto, de x/y. Equivalente de teclado = %
+
+[pt.or]
+Calcula o OU na forma de bits. Equivalente de teclado = |
+
+[pt.lsh]
+Desloca para a esquerda. Para deslocar para a direita, use Inv+Lsh. Depois de clicar este botão, você deve especificar (em binários) quantas posições para a esquerda ou para a direita quer deslocar o número na área de exibição e, em seguida, clicar em =. Equivalente de teclado = <
+
+[pt.and]
+Calcula o E na forma de bits. Equivalente de teclado = &
+
+[pt.xor]
+Calcula o OU exclusivo na forma de bits. Equivalente de teclado = ^
+
+[pt.not]
+Calcula o inverso na forma de bits. Equivalente de teclado = ~
+
+[pt.int]
+Exibe a parte inteira de um valor decimal. Para exibir a parte fracionária de um valor decimal, use Inv+Int. Equivalente de teclado = ;
+
+[pt.hex_digit]
+Insere a letra selecionada no valor. Este botão só fica disponível se o modo hexadecimal estiver ativado. Equivalente de teclado = A-F
+
+[pt.memory_indicator]
+Quando você armazena um número na memória, aparece um M na caixa acima das opções de memória.
+
+[pt.paren_indicator]
+O número de níveis atual aparece na caixa acima do botão ")". O número máximo de níveis é de 25.
+
+# --- Español ---
+
+[es.clear]
+Borra el cálculo actual. Equivalente de teclado = ESC
+
+[es.ce]
+Borra el número mostrado. Equivalente de teclado = DEL
+
+[es.back]
+Borra el último dígito del número mostrado. Equivalente de teclado = RETROCESO
+
+[es.reciprocal]
+Calcula el recíproco del número mostrado. Equivalente de teclado = r
+
+[es.mc]
+Borra cualquier número almacenado en la memoria. Equivalente de teclado = CTRL+L
+
+[es.mr]
+Recupera el número almacenado en la memoria. El número permanece en la memoria. Equivalente de teclado = CTRL+R
+
+[es.ms]
+Almacena en la memoria el número mostrado. Equivalente de teclado = CTRL+M
+
+[es.mplus]
+Suma el número mostrado al número que ya está en la memoria. Equivalente de teclado = CTRL+P
+
+[es.display]
+Muestra cada número a medida que se escribe y, a continuación, muestra el resultado del cálculo.
+
+[es.digit]
+Introduce este número en la pantalla de la calculadora. Equivalente de teclado = 0-9
+
+[es.sign]
+Cambia el signo del número mostrado. Equivalente de teclado = F9
+
+[es.decimal_point]
+Inserta un separador decimal. Puede elegir punto o coma en Ver > Separador decimal. Equivalente de teclado = . o ,
+
+[es.divide]
+Divide. Equivalente de teclado = /
+
+[es.multiply]
+Multiplica. Equivalente de teclado = *
+
+[es.subtract]
+Resta. Equivalente de teclado = -
+
+[es.add]
+Suma. Equivalente de teclado = +
+
+[es.sqrt]
+Calcula la raíz cuadrada del número mostrado. Equivalente de teclado = @
+
+[es.percent]
+Muestra el resultado de la multiplicación como porcentaje. Escriba un número, haga clic en *, haga clic en el segundo número y, a continuación, haga clic en %. Si usa cualquier operador distinto de *, la calculadora supone que quiso usar * y multiplica los números. Equivalente de teclado = %
+
+[es.equals]
+Realiza la operación pendiente con los dos números anteriores. Para repetir la última operación, haga clic de nuevo. Equivalente de teclado = ENTRAR
+
+[es.hex]
+Convierte el número mostrado al sistema numérico hexadecimal. El valor hexadecimal máximo sin signo es una expresión de 32 bits en la que todos los bits están establecidos en 1; por ejemplo, 0xFFFFFFFF. Equivalente de teclado = F5
+
+[es.dword]
+Muestra la representación completa de 32 bits del número mostrado. Equivalente de teclado = F2
+
+[es.word]
+Muestra los 16 bits de orden inferior del número actual. Equivalente de teclado = F3
+
+[es.byte]
+Muestra los 8 bits de orden inferior del número actual. Equivalente de teclado = F4
+
+[es.dec]
+Convierte el número mostrado al sistema numérico decimal. El intervalo de números decimales es de -9.9999999999999e-307 a 9.9999999999999e+307. Equivalente de teclado = F6
+
+[es.oct]
+Convierte el número mostrado al sistema numérico octal. El valor octal máximo sin signo es una expresión de 32 bits en la que todos los bits están establecidos en 1; por ejemplo, 037777777777. Equivalente de teclado = F7
+
+[es.bin]
+Convierte el número mostrado al sistema numérico binario. El valor binario máximo sin signo es una expresión de 32 bits en la que todos los bits están establecidos en 1. Equivalente de teclado = F8
+
+[es.deg]
+Establece la entrada trigonométrica en grados cuando se está en modo decimal. Equivalente de teclado = F2
+
+[es.rad]
+Establece la entrada trigonométrica en radianes cuando se está en modo decimal. Equivalente de teclado = F6
+
+[es.grad]
+Establece la entrada trigonométrica en grados centesimales cuando se está en modo decimal. Equivalente de teclado = F4
+
+[es.pi]
+Muestra el valor de pi (3,1415...). Para mostrar 2 * pi (6,28...), use Inv+PI. Equivalente de teclado = p
+
+[es.inv]
+Activa la función inversa para sin, cos, tan, PI, x^y, x^2, x^3, ln, log, Ave, Sum y s. Las funciones desactivan automáticamente la opción inversa cuando termina el cálculo. Equivalente de teclado = i
+
+[es.hyp]
+Activa la función hiperbólica para sin, cos y tan. Las funciones desactivan automáticamente la opción hiperbólica cuando termina el cálculo. Equivalente de teclado = h
+
+[es.sta]
+Haga clic aquí para abrir el Cuadro de estadísticas y activar los botones Ave, Sum, s y Dat. Equivalente de teclado = CTRL+S
+
+[es.ave]
+Calcula el promedio de los valores mostrados en el Cuadro de estadísticas. Para calcular el promedio de los cuadrados, use Inv+Ave. Este botón solo está disponible después de hacer clic en Sta. Equivalente de teclado = CTRL+A
+
+[es.sum]
+Calcula la suma de los valores mostrados en el Cuadro de estadísticas. Para calcular la suma de los cuadrados, use Inv+Sum. Este botón solo está disponible después de hacer clic en Sta. Equivalente de teclado = CTRL+T
+
+[es.stddev]
+Calcula la desviación estándar utilizando el parámetro de población n-1. Para calcular la desviación estándar utilizando el parámetro de población n, use Inv+s. Este botón solo está disponible después de hacer clic en Sta. Equivalente de teclado = CTRL+D
+
+[es.dat]
+Introduce el número mostrado en el Cuadro de estadísticas. Este botón solo está disponible después de hacer clic en Sta. Equivalente de teclado = INS
+
+[es.fe]
+Activa y desactiva la notación científica. Los números mayores que 10^15 siempre se muestran exponencialmente. F-E solo puede usarse con el sistema numérico decimal. Equivalente de teclado = v
+
+[es.dms]
+Convierte el número mostrado al formato grados-minutos-segundos (suponiendo que el número mostrado esté en grados). Para convertir el número mostrado a grados (suponiendo que esté en formato grados-minutos-segundos), use Inv+dms. Equivalente de teclado = m
+
+[es.sin]
+Calcula el seno del número mostrado. Para calcular el arcoseno, use Inv+sin. Para calcular el seno hiperbólico, use Hyp+sin. Para calcular el arcoseno hiperbólico, use Inv+Hyp+sin. Equivalente de teclado = s
+
+[es.cos]
+Calcula el coseno del número mostrado. Para calcular el arcocoseno, use Inv+cos. Para calcular el coseno hiperbólico, use Hyp+cos. Para calcular el arcocoseno hiperbólico, use Inv+Hyp+cos. Equivalente de teclado = o
+
+[es.tan]
+Calcula la tangente del número mostrado. Para calcular el arcotangente, use Inv+tan. Para calcular la tangente hiperbólica, use Hyp+tan. Para calcular el arcotangente hiperbólico, use Inv+Hyp+tan. Equivalente de teclado = t
+
+[es.exp]
+Permite introducir números en notación científica. El límite superior del exponente es +289. Puede seguir escribiendo números siempre que use únicamente las teclas 0 a 9. Exp solo puede usarse con el sistema numérico decimal. Equivalente de teclado = x
+
+[es.pow]
+Calcula x elevado a la potencia y. Para calcular la raíz y-ésima de x, use Inv+x^y. Equivalente de teclado = y
+
+[es.cube]
+Eleva al cubo el número mostrado. Para calcular la raíz cúbica, use Inv+x^3. Equivalente de teclado = #
+
+[es.square]
+Eleva al cuadrado el número mostrado. Para calcular la raíz cuadrada, use Inv+x^2. Equivalente de teclado = @
+
+[es.ln]
+Calcula el logaritmo natural (base e). Para calcular e elevado a la potencia x, donde x es el número actual, use Inv+ln. Equivalente de teclado = n
+
+[es.log]
+Calcula el logaritmo común (base 10). Para calcular 10 elevado a la potencia x, use Inv+log. Equivalente de teclado = l
+
+[es.factorial]
+Calcula el factorial del número mostrado. Equivalente de teclado = !
+
+[es.open_paren]
+Inicia un nuevo nivel de paréntesis. El número actual de niveles aparece en el cuadro situado encima del botón ). El número máximo de niveles es 25. Equivalente de teclado = (
+
+[es.close_paren]
+Cierra el nivel actual de paréntesis. Equivalente de teclado = )
+
+[es.mod]
+Muestra el módulo, o resto, de x/y. Equivalente de teclado = %
+
+[es.or]
+Calcula el OR bit a bit. Equivalente de teclado = |
+
+[es.lsh]
+Desplaza a la izquierda. Para desplazar a la derecha, use Inv+Lsh. Después de hacer clic en este botón, indique (en binario) cuántas posiciones desea desplazar a la izquierda o a la derecha el número de la pantalla y, a continuación, haga clic en =. Equivalente de teclado = <
+
+[es.and]
+Calcula el AND bit a bit. Equivalente de teclado = &
+
+[es.xor]
+Calcula el OR exclusivo bit a bit. Equivalente de teclado = ^
+
+[es.not]
+Calcula la inversión bit a bit. Equivalente de teclado = ~
+
+[es.int]
+Muestra la parte entera de un valor decimal. Para mostrar la parte fraccionaria de un valor decimal, use Inv+Int. Equivalente de teclado = ;
+
+[es.hex_digit]
+Introduce la letra seleccionada en el valor. Este botón solo está disponible cuando el modo hexadecimal está activado. Equivalente de teclado = A-F
+
+[es.memory_indicator]
+Cuando se almacena un número en la memoria, aparece una M en el cuadro situado encima de los controles de memoria.
+
+[es.paren_indicator]
+El número actual de niveles de paréntesis aparece en el cuadro situado encima del botón ). El número máximo de niveles es 25.
