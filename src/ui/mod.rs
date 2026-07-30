@@ -6,6 +6,16 @@
 //! matching the reference.  This module keeps the recovered Calculator child
 //! control coordinates but lets wxWidgets own the frame, menu bar and controls.
 
+#[cfg(target_os = "windows")]
+#[path = "windows.rs"]
+mod frontend;
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+mod frontend;
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[path = "other.rs"]
+mod frontend;
+
 use crate::calc::{Base, BinaryOp, Calculator, Mode};
 use crate::calculation_log::CalculationLog;
 use crate::expr::AngleMode;
@@ -25,53 +35,14 @@ use wxdragon::id::ID_OK;
 use wxdragon::window::BackgroundStyle;
 use plotters::drawing::IntoDrawingArea;
 use plotters_wxdragon::WxBackend;
-use wxdragon::font::{Font, FontFamily, FontStyle, FontWeight};
+use wxdragon::font::{Font, FontWeight};
 use wxdragon::menus::menuitem::{ItemKind, MenuItem};
 use wxdragon::prelude::*;
 use wxdragon::widgets::radio_button::RadioButtonStyle;
 use wxdragon::widgets::splitter_window::{SplitterWindow, SplitterWindowStyle};
 use wxdragon::widgets::static_text::{StaticText, StaticTextStyle};
-#[cfg(not(target_os = "windows"))]
-use wxdragon::widgets::staticbox::StaticBox;
 use wxdragon::window::WxWidget;
 use wxdragon::widgets::textctrl::TextCtrlStyle;
-
-#[cfg(target_os = "windows")]
-#[link(name = "uxtheme")]
-extern "system" {
-    fn SetWindowTheme(
-        hwnd: *mut core::ffi::c_void,
-        sub_app_name: *const u16,
-        sub_id_list: *const u16,
-    ) -> i32;
-}
-
-/// Keep wxDragon as the owner of every control, but ask Windows to render
-/// those controls with the classic non-themed metrics used by Calculator.
-/// On current Windows this removes the rounded Common Controls appearance
-/// that made buildfix2 look unlike the Win95 reference.
-#[cfg(target_os = "windows")]
-fn use_classic_windows_theme(widget: &impl WxWidget) {
-    let empty = [0u16];
-    unsafe {
-        let _ = SetWindowTheme(widget.get_handle() as *mut core::ffi::c_void, empty.as_ptr(), empty.as_ptr());
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn use_classic_windows_theme(_widget: &impl WxWidget) {}
-
-/// wxGTK normally inherits the desktop theme's panel colour, which can make the
-/// fixed Windows 95 bevel palette look like a collection of unrelated widgets.
-/// Give Linux calculator surfaces the original default button-face grey so the
-/// portable CSS bevels have the same visual base as the Win95 reference.
-#[cfg(target_os = "linux")]
-fn use_classic_surface(widget: &impl WxWidget) {
-    widget.set_background_color(wxdragon::color::Colour::rgb(192, 192, 192));
-}
-
-#[cfg(not(target_os = "linux"))]
-fn use_classic_surface(_widget: &impl WxWidget) {}
 
 // The recovered child-control coordinates are 96-DPI source units.  Render
 // them at a 120-DPI design scale (125%) so the entire Calculator surface is
@@ -95,9 +66,9 @@ const SCI_H: i32 = dp(304);
 // Optional calculation-history pane.  Buildfix40 makes this a genuine child
 // pane of wxSplitterWindow rather than a second top-level frame.  The recovered
 // Calculator controls stay in a fixed-size left host while History occupies the
-// right pane.  The sash uses classic non-live dragging: while it moves, only the
-// splitter guide changes; on release we resize the History side and restore the
-// Calculator pane to its exact recovered width.
+// right pane. Windows uses the native non-live sash; Linux covers the themed
+// sash with its own etched drag handle. On release both paths resize History and
+// restore the Calculator pane to its exact recovered width.
 const HISTORY_MARGIN: i32 = dp(8);
 const HISTORY_HEADER_H: i32 = dp(18);
 const HISTORY_BUTTON_W: i32 = dp(94);
@@ -110,6 +81,8 @@ const HISTORY_SEPARATOR_W: i32 = 2;
 // Calculator/History splitter, so the recovered Calculator geometry never
 // stretches or reflows when graphing is enabled.
 const GRAPH_W: i32 = dp(330);
+const GRAPH_MIN_W: i32 = dp(220);
+const GRAPH_MAX_W: i32 = dp(520);
 const GRAPH_MARGIN: i32 = dp(8);
 const GRAPH_LABEL_H: i32 = dp(17);
 const GRAPH_FIELD_H: i32 = dp(24);
@@ -269,6 +242,7 @@ struct Ui {
     root_surface: Panel,
     splitter: SplitterWindow,
     graph_panel: GraphPanel,
+    graph_width: Cell<i32>,
     calculator_host: Panel,
     standard_panel: Panel,
     scientific_panel: Panel,
@@ -333,20 +307,20 @@ pub fn run() -> Result<(), String> {
         platform::set_calculator_icon(frame.get_handle());
         platform::install_context_help_dismissal(frame.get_handle());
 
-        let font = classic_font(FontWeight::Normal);
-        let button_font = classic_font(FontWeight::Bold);
+        let font = frontend::classic_font(FontWeight::Normal);
+        let button_font = frontend::classic_font(FontWeight::Bold);
         let tooltips = TooltipCatalog::load_default();
         let initial_display = calculator.display.clone();
         let decimal_label = calculator.decimal_separator().to_string();
         frame.set_font(&font);
-        use_classic_surface(&frame);
+        frontend::apply_surface(&frame);
 
         let root_surface = Panel::builder(&frame)
             .with_pos(Point::new(0, 0))
             .with_size(Size::new(initial_frame_width, STD_H))
             .build();
         root_surface.set_font(&font);
-        use_classic_surface(&root_surface);
+        frontend::apply_surface(&root_surface);
         platform::install_context_help_dismissal(root_surface.get_handle());
 
         let menu_handles = install_menu_bar(
@@ -367,14 +341,15 @@ pub fn run() -> Result<(), String> {
         let splitter = SplitterWindow::builder(&root_surface)
             .with_pos(Point::new(initial_graph_width, 0))
             .with_size(Size::new(initial_splitter_width, STD_H))
-            .with_style(SplitterWindowStyle::Vertical)
+            .with_style(frontend::splitter_style())
             .build();
         splitter.set_minimum_pane_size(platform::scale_classic_control_metric(
             splitter.get_handle(),
             dp(48),
         ));
-        use_classic_windows_theme(&splitter);
-        use_classic_surface(&splitter);
+        frontend::apply_classic_theme(&splitter);
+        frontend::apply_surface(&splitter);
+        platform::install_classic_splitter_painter(splitter.get_handle());
         platform::install_context_help_dismissal(splitter.get_handle());
 
         let calculator_host = Panel::builder(&splitter)
@@ -382,7 +357,7 @@ pub fn run() -> Result<(), String> {
             .with_size(Size::new(STD_W, STD_H))
             .build();
         calculator_host.set_font(&font);
-        use_classic_surface(&calculator_host);
+        frontend::apply_surface(&calculator_host);
         platform::install_context_help_dismissal(calculator_host.get_handle());
 
         // The recovered Calculator panels keep their exact coordinates and
@@ -393,7 +368,7 @@ pub fn run() -> Result<(), String> {
             .with_size(Size::new(STD_W, STD_H))
             .build();
         standard_panel.set_font(&font);
-        use_classic_surface(&standard_panel);
+        frontend::apply_surface(&standard_panel);
         platform::install_context_help_dismissal(standard_panel.get_handle());
 
         let scientific_panel = Panel::builder(&calculator_host)
@@ -401,7 +376,7 @@ pub fn run() -> Result<(), String> {
             .with_size(Size::new(SCI_W, SCI_H))
             .build();
         scientific_panel.set_font(&font);
-        use_classic_surface(&scientific_panel);
+        frontend::apply_surface(&scientific_panel);
         scientific_panel.show(false);
         platform::install_context_help_dismissal(scientific_panel.get_handle());
 
@@ -447,10 +422,10 @@ pub fn run() -> Result<(), String> {
         attach_context_help(&scientific_memory, &tooltips, settings.language, strings.whats_this(), "memory_indicator", &mut tooltip_targets);
         attach_context_help(&scientific_parens, &tooltips, settings.language, strings.whats_this(), "paren_indicator", &mut tooltip_targets);
 
-        make_separator_line(&scientific_panel, SCI_SEPARATOR_Y, 500);
-        make_group_box(&scientific_panel, 13, SCI_SELECTOR_BOX_Y, 266, 34);
-        make_group_box(&scientific_panel, 286, SCI_SELECTOR_BOX_Y, 198, 34);
-        make_group_box(&scientific_panel, 13, SCI_COMMAND_BOX_Y, 127, 36);
+        frontend::make_separator_line(&scientific_panel, SCI_SEPARATOR_Y, 500);
+        frontend::make_group_box(&scientific_panel, 13, SCI_SELECTOR_BOX_Y, 266, 34);
+        frontend::make_group_box(&scientific_panel, 286, SCI_SELECTOR_BOX_Y, 198, 34);
+        frontend::make_group_box(&scientific_panel, 13, SCI_COMMAND_BOX_Y, 127, 36);
 
         let mut action_buttons: Vec<(Button, Action)> = Vec::new();
         for def in standard_button_defs() {
@@ -481,7 +456,7 @@ pub fn run() -> Result<(), String> {
             .with_size(Size::new(classic_metric(&scientific_panel, SCI_CHECK_W), classic_metric(&scientific_panel, SCI_CHECK_H)))
             .build();
         inv.set_font(&font);
-        use_classic_windows_theme(&inv);
+        frontend::apply_classic_theme(&inv);
         inv.raise();
         attach_context_help(&inv, &tooltips, settings.language, strings.whats_this(), "inv", &mut tooltip_targets);
 
@@ -491,7 +466,7 @@ pub fn run() -> Result<(), String> {
             .with_size(Size::new(classic_metric(&scientific_panel, SCI_CHECK_W), classic_metric(&scientific_panel, SCI_CHECK_H)))
             .build();
         hyp.set_font(&font);
-        use_classic_windows_theme(&hyp);
+        frontend::apply_classic_theme(&hyp);
         hyp.raise();
         attach_context_help(&hyp, &tooltips, settings.language, strings.whats_this(), "hyp", &mut tooltip_targets);
 
@@ -510,6 +485,7 @@ pub fn run() -> Result<(), String> {
             root_surface,
             splitter,
             graph_panel,
+            graph_width: Cell::new(GRAPH_W),
             calculator_host,
             standard_panel,
             scientific_panel,
@@ -564,6 +540,7 @@ pub fn run() -> Result<(), String> {
         bind_keyboard(&ui);
         bind_splitter(&ui);
         bind_graph(&ui);
+        frontend::install_panel_resizing(&ui);
         bind_companion_tracking(&ui);
         refresh(&ui);
         refresh_calculation_history(&ui);
@@ -771,26 +748,6 @@ fn action_help_key(action: Action) -> &'static str {
     }
 }
 
-fn classic_font(weight: FontWeight) -> Font {
-    // Microsoft Sans Serif is the TrueType successor/metric-compatible alias
-    // for the old bitmap MS Sans Serif face.  It preserves the Win95 visual
-    // character while allowing modern GDI/DirectWrite font smoothing instead
-    // of the visibly jagged bitmap glyphs seen in buildfix3.
-    Font::new_with_details(
-        9,
-        FontFamily::Swiss.as_i32(),
-        FontStyle::Normal.as_i32(),
-        weight.as_i32(),
-        false,
-        if cfg!(target_os = "windows") {
-            "Microsoft Sans Serif"
-        } else {
-            ""
-        },
-    )
-    .unwrap_or_else(Font::new)
-}
-
 fn make_display(parent: &Panel, x: i32, y: i32, width: i32, font: &Font, initial: &str) -> TextCtrl {
     let display = TextCtrl::builder(parent)
         .with_value(initial)
@@ -799,7 +756,7 @@ fn make_display(parent: &Panel, x: i32, y: i32, width: i32, font: &Font, initial
         .with_style(TextCtrlStyle::ReadOnly | TextCtrlStyle::Right)
         .build();
     display.set_font(font);
-    use_classic_windows_theme(&display);
+    frontend::apply_classic_theme(&display);
     display.set_background_color(WHITE);
     platform::install_classic_display_painter(display.get_handle());
     display.set_can_focus(false);
@@ -819,18 +776,14 @@ fn build_history_panel<W: WxWidget>(
         .with_size(Size::new(width, height))
         .build();
     panel.set_font(font);
-    use_classic_surface(&panel);
+    frontend::apply_surface(&panel);
     platform::install_context_help_dismissal(panel.get_handle());
 
-    // wxSplitterWindow's classic sash can blend into the same button-face
-    // colour used by both panes. Keep the sash itself untouched for dragging,
-    // but paint a two-pixel etched rule over the sash boundary so the pane
-    // border remains continuous with the surrounding classic etched lines.
-    let separator = StaticText::builder(parent)
-        .with_label("")
-        .with_pos(Point::new(0, 0))
-        .with_size(Size::new(HISTORY_SEPARATOR_W, height))
-        .build();
+    // wxSplitterWindow's native sash can blend into the pane face or inherit
+    // a desktop-theme colour. Frontend policy supplies the visible etched rule:
+    // Windows centres it over the native sash, while Linux uses a wider custom
+    // drag handle that completely covers wxGTK's warm themed sash.
+    let separator = frontend::build_history_separator(parent, &panel, height);
     platform::install_classic_vertical_separator_painter(separator.get_handle());
     separator.show(false);
 
@@ -844,6 +797,7 @@ fn build_history_panel<W: WxWidget>(
         .with_size(Size::new(width - 2 * HISTORY_MARGIN, HISTORY_HEADER_H))
         .build();
     title.set_font(button_font);
+    title.set_foreground_color(BLACK);
     platform::install_context_help_dismissal(title.get_handle());
 
     let text_y = HISTORY_MARGIN + HISTORY_HEADER_H + HISTORY_GAP;
@@ -861,10 +815,9 @@ fn build_history_panel<W: WxWidget>(
         )
         .build();
     text.set_font(font);
-    use_classic_windows_theme(&text);
+    frontend::apply_classic_theme(&text);
     text.set_background_color(WHITE);
-    #[cfg(target_os = "linux")]
-    platform::install_classic_display_painter(text.get_handle());
+    frontend::style_history_text(&text);
     text.set_can_focus(false);
     platform::install_context_help_dismissal(text.get_handle());
 
@@ -903,13 +856,14 @@ fn build_graph_panel<W: WxWidget>(
         .with_size(Size::new(width, height))
         .build();
     panel.set_font(font);
-    use_classic_surface(&panel);
+    frontend::apply_surface(&panel);
     platform::install_context_help_dismissal(panel.get_handle());
 
+    let separator_width = frontend::graph_separator_width();
     let separator = StaticText::builder(&panel)
         .with_label("")
-        .with_pos(Point::new(width - GRAPH_SEPARATOR_W, 0))
-        .with_size(Size::new(GRAPH_SEPARATOR_W, height))
+        .with_pos(Point::new(width - separator_width, 0))
+        .with_size(Size::new(separator_width, height))
         .build();
     platform::install_classic_vertical_separator_painter(separator.get_handle());
 
@@ -921,7 +875,7 @@ fn build_graph_panel<W: WxWidget>(
     function_label.set_font(button_font);
 
     let field_y = GRAPH_MARGIN + GRAPH_LABEL_H;
-    let expression_w = width - 2 * GRAPH_MARGIN - GRAPH_PLOT_W - GRAPH_GAP - GRAPH_SEPARATOR_W;
+    let expression_w = width - 2 * GRAPH_MARGIN - GRAPH_PLOT_W - GRAPH_GAP - separator_width;
     let expression = TextCtrl::builder(&panel)
         .with_value("")
         .with_pos(Point::new(GRAPH_MARGIN, field_y))
@@ -929,7 +883,7 @@ fn build_graph_panel<W: WxWidget>(
         .with_style(TextCtrlStyle::ProcessEnter)
         .build();
     expression.set_font(font);
-    use_classic_windows_theme(&expression);
+    frontend::apply_classic_theme(&expression);
     expression.set_background_color(WHITE);
 
     let plot_button = Button::builder(&panel)
@@ -944,14 +898,14 @@ fn build_graph_panel<W: WxWidget>(
     let canvas_frame = StaticText::builder(&panel)
         .with_label("")
         .with_pos(Point::new(GRAPH_MARGIN, field_y + GRAPH_FIELD_H + GRAPH_GAP))
-        .with_size(Size::new(width - 2 * GRAPH_MARGIN - GRAPH_SEPARATOR_W, dp(110)))
+        .with_size(Size::new(width - 2 * GRAPH_MARGIN - separator_width, dp(110)))
         .build();
     platform::install_classic_sunken_field_painter(canvas_frame.get_handle());
     canvas_frame.lower();
 
     let canvas = Panel::builder(&panel)
         .with_pos(Point::new(GRAPH_MARGIN + 2, field_y + GRAPH_FIELD_H + GRAPH_GAP + 2))
-        .with_size(Size::new(width - 2 * GRAPH_MARGIN - GRAPH_SEPARATOR_W - 4, dp(106)))
+        .with_size(Size::new(width - 2 * GRAPH_MARGIN - separator_width - 4, dp(106)))
         .build();
     canvas.set_background_color(WHITE);
     canvas.set_background_style(BackgroundStyle::Paint);
@@ -960,7 +914,7 @@ fn build_graph_panel<W: WxWidget>(
     let roots = StaticText::builder(&panel)
         .with_label(strings.graph_roots_not_plotted())
         .with_pos(Point::new(GRAPH_MARGIN, height - GRAPH_MARGIN - GRAPH_BUTTON_H - GRAPH_GAP - GRAPH_ROOTS_H))
-        .with_size(Size::new(width - 2 * GRAPH_MARGIN - GRAPH_SEPARATOR_W, GRAPH_ROOTS_H))
+        .with_size(Size::new(width - 2 * GRAPH_MARGIN - separator_width, GRAPH_ROOTS_H))
         .build();
     roots.set_font(font);
 
@@ -977,7 +931,7 @@ fn build_graph_panel<W: WxWidget>(
 
     let export_button = Button::builder(&panel)
         .with_label(strings.graph_export())
-        .with_pos(Point::new(width - GRAPH_MARGIN - GRAPH_SEPARATOR_W - GRAPH_BUTTON_W, button_y))
+        .with_pos(Point::new(width - GRAPH_MARGIN - separator_width - GRAPH_BUTTON_W, button_y))
         .with_size(Size::new(GRAPH_BUTTON_W, GRAPH_BUTTON_H))
         .build();
     export_button.set_font(button_font);
@@ -1001,69 +955,8 @@ fn build_graph_panel<W: WxWidget>(
     }
 }
 
-fn make_separator_line(parent: &Panel, y: i32, w: i32) {
-    // Win95 uses a very thin etched rule here, not a recessed empty field.
-    // Keep the control itself only two pixels high so high-DPI displays do
-    // not turn the separator into a thick band; the painter supplies the
-    // stronger contrast via a dark shadow and light highlight pair.
-    #[cfg(target_os = "windows")]
-    {
-        let line = StaticText::builder(parent)
-            .with_label("")
-            .with_pos(Point::new(0, dp(y)))
-            .with_size(Size::new(dp(w), 2))
-            .build();
-        platform::install_classic_separator_painter(line.get_handle());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        // wxGTK fallback: an empty, shallow native group frame gives the same
-        // visual role without introducing a Windows-only custom control.
-        let line = StaticBox::builder(parent)
-            .with_label("")
-            .with_pos(Point::new(0, dp(y)))
-            .with_size(Size::new(dp(w), 2))
-            .build();
-        platform::install_classic_separator_painter(line.get_handle());
-        line.lower();
-    }
-}
-
 fn classic_metric(parent: &Panel, value: i32) -> i32 {
     platform::scale_classic_control_metric(parent.get_handle(), dp(value))
-}
-
-fn make_group_box(parent: &Panel, x: i32, y: i32, w: i32, h: i32) {
-    #[cfg(target_os = "windows")]
-    {
-        // A native empty StaticBox develops small edge overruns on current
-        // Windows at high DPI.  Keep the wxDragon control, but paint the
-        // complete etched frame ourselves inside its client rectangle so the
-        // four sides meet exactly at the corners.
-        let group = StaticText::builder(parent)
-            .with_label("")
-            .with_pos(Point::new(dp(x), dp(y)))
-            .with_size(Size::new(dp(w), dp(h)))
-            .build();
-        platform::install_classic_group_box_painter(group.get_handle());
-        // Bottom of the z-order so the frame sits behind the controls it
-        // decorates, and clipped against them so its background fill cannot
-        // erase them when it repaints.
-        group.lower();
-        platform::enable_clip_siblings(group.get_handle());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let group = StaticBox::builder(parent)
-            .with_label("")
-            .with_pos(Point::new(dp(x), dp(y)))
-            .with_size(Size::new(dp(w), dp(h)))
-            .build();
-        platform::install_classic_group_box_painter(group.get_handle());
-        group.lower();
-    }
 }
 
 fn make_indicator(parent: &Panel, font: &Font, x: i32, y: i32, w: i32, h: i32) -> StaticText {
@@ -1144,7 +1037,7 @@ fn make_radio(
         .with_style(style)
         .build();
     radio.set_font(font);
-    use_classic_windows_theme(&radio);
+    frontend::apply_classic_theme(&radio);
     // Keep the selector above the decorative group box that frames it, so the
     // frame can never sit between the pointer and this control.
     radio.raise();
@@ -1206,19 +1099,7 @@ fn bind_scientific_selectors(ui: &Rc<Ui>) {
     // native control instead.  Every branch of apply_selector is idempotent and
     // reads the control's true state, so if the wx handlers *are* firing after
     // all, the duplicate delivery is harmless rather than a double-toggle.
-    #[cfg(target_os = "windows")]
-    {
-        let mut children: Vec<_> = ui.base_radios.iter().map(|r| r.get_handle()).collect();
-        children.extend(ui.angle_radios.iter().map(|r| r.get_handle()));
-        children.push(ui.inv.get_handle());
-        children.push(ui.hyp.get_handle());
-        let ui_c = Rc::clone(ui);
-        platform::install_selector_notifier(
-            ui.scientific_panel.get_handle(),
-            &children,
-            Box::new(move |index| apply_selector(&ui_c, index)),
-        );
-    }
+    frontend::install_selector_bridge(ui);
 }
 
 /// Apply a selector identified by its index in the notifier table:
@@ -1226,27 +1107,6 @@ fn bind_scientific_selectors(ui: &Rc<Ui>) {
 /// control's real BM_GETCHECK state into the model rather than toggling a
 /// cached flag, which keeps the model correct no matter how many times (or how
 /// few) the notification is delivered.
-#[cfg(target_os = "windows")]
-fn apply_selector(ui: &Rc<Ui>, index: usize) {
-    const BASES: [Base; 4] = [Base::Hex, Base::Dec, Base::Oct, Base::Bin];
-    const ANGLES: [AngleMode; 3] = [AngleMode::Degrees, AngleMode::Radians, AngleMode::Grads];
-    match index {
-        0..=3 => select_base(ui, index, BASES[index]),
-        4..=6 => select_angle(ui, index - 4, ANGLES[index - 4]),
-        7 => {
-            let checked = platform::is_button_checked(ui.inv.get_handle());
-            mutate_calculator(ui, |calc| calc.inv = checked);
-            refresh(ui);
-        }
-        8 => {
-            let checked = platform::is_button_checked(ui.hyp.get_handle());
-            mutate_calculator(ui, |calc| calc.hyp = checked);
-            refresh(ui);
-        }
-        _ => {}
-    }
-}
-
 fn select_base(ui: &Ui, index: usize, base: Base) {
     for (i, radio) in ui.base_radios.iter().enumerate() {
         radio.set_value(i == index);
@@ -1593,10 +1453,15 @@ fn redo(ui: &Rc<Ui>) {
     }
 }
 
+/// Display a synchronous application-owned message.  Windows continues to use
+/// the existing native MessageBoxW path.  wxGTK previously wrote these messages
+/// only to stderr, which made Help-viewer failures invisible and made About look
+/// as though it did nothing when OpenCalc was started from a desktop launcher.
 fn persist_settings(ui: &Ui) {
     let strings = strings_for(ui);
     if let Err(error) = ui.settings.borrow_mut().save() {
-        platform::message(
+        frontend::show_modal_message(
+            &ui.frame,
             strings.calculator_title(),
             &format!("{}: {error}", strings.settings_error_prefix()),
         );
@@ -1713,6 +1578,18 @@ fn set_graph_visible(ui: &Rc<Ui>, visible: bool) {
         ui.graph_panel.canvas.refresh(true, None);
     }
     persist_settings(ui);
+}
+
+fn set_graph_width(ui: &Rc<Ui>, width: i32) {
+    let width = width.clamp(GRAPH_MIN_W, GRAPH_MAX_W);
+    if ui.graph_width.replace(width) == width {
+        return;
+    }
+    if ui.settings.borrow().graph_visible {
+        let mode = ui.calc.borrow().mode;
+        sync_mode_surface(ui, mode);
+        ui.graph_panel.canvas.refresh(false, None);
+    }
 }
 
 fn set_history_visible(ui: &Rc<Ui>, visible: bool) {
@@ -2037,17 +1914,42 @@ fn perform(ui: &Rc<Ui>, action: Action) {
     match action {
         Action::Copy => {
             let strings = strings_for(ui);
-            let raw = ui.calc.borrow().display.clone();
-            let value = strings.runtime_message(&raw).unwrap_or(raw.as_str());
-            if let Err(error) = platform::copy_text(value) {
+            let graph_editor = ui.graph_panel.expression.get_handle();
+            let value = if platform::editable_owns_clipboard(graph_editor) {
+                // Match native TextCtrl behavior: copy only the selected
+                // function text and do nothing when there is no selection.
+                let Some(selected) = platform::selected_text(graph_editor) else {
+                    return;
+                };
+                selected
+            } else {
+                let raw = ui.calc.borrow().display.clone();
+                strings.runtime_message(&raw).unwrap_or(raw.as_str()).to_string()
+            };
+            if let Err(error) = platform::copy_text(&value) {
                 let localized = strings.runtime_message(&error).unwrap_or(error.as_str());
-                platform::message(strings.calculator_title(), localized);
+                frontend::show_modal_message(&ui.frame, strings.calculator_title(), localized);
             }
             return;
         }
         Action::Paste => {
             match platform::paste_text() {
                 Ok(Some(text)) => {
+                    // Frame-level Paste accelerators must not steal Paste from
+                    // the editable Function field on either native frontend. When that TextCtrl owns
+                    // focus, preserve ordinary editor semantics: replace the
+                    // current selection (or insert at the caret) and do not
+                    // evaluate/log the polynomial as a numeric calculation.
+                    let graph_editor = ui.graph_panel.expression.get_handle();
+                    if platform::editable_owns_clipboard(graph_editor) {
+                        if !platform::insert_text_at_selection(graph_editor, &text) {
+                            // Portable backends without a native editable bridge
+                            // still get a safe full-field replacement.
+                            ui.graph_panel.expression.set_value(&text);
+                        }
+                        return;
+                    }
+
                     let expression = text.split_whitespace().collect::<Vec<_>>().join(" ");
                     mutate_calculator(ui, |calc| calc.paste_expression(&text));
                     if !expression.is_empty() {
@@ -2058,7 +1960,7 @@ fn perform(ui: &Rc<Ui>, action: Action) {
                 Err(error) => {
                     let strings = strings_for(ui);
                     let localized = strings.runtime_message(&error).unwrap_or(error.as_str());
-                    platform::message(strings.calculator_title(), localized);
+                    frontend::show_modal_message(&ui.frame, strings.calculator_title(), localized);
                 }
             }
             refresh(ui);
@@ -2066,7 +1968,7 @@ fn perform(ui: &Rc<Ui>, action: Action) {
         }
         Action::About => {
             let strings = strings_for(ui);
-            platform::message(strings.about_title(), strings.about_body());
+            frontend::show_modal_message(&ui.frame, strings.about_title(), strings.about_body());
             return;
         }
         Action::Help => {
@@ -2074,7 +1976,7 @@ fn perform(ui: &Rc<Ui>, action: Action) {
             if let Err(error) = platform::launch_help(language) {
                 let strings = strings_for(ui);
                 let localized = strings.runtime_message(&error).unwrap_or(error.as_str());
-                platform::message(strings.help_title(), localized);
+                frontend::show_modal_message(&ui.frame, strings.help_title(), localized);
             }
             return;
         }
@@ -2186,7 +2088,8 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
     let history_width = configured_history_width(ui);
     let splitter_width = calculator_width
         + if history_visible { history_width } else { 0 };
-    let graph_width = if graph_visible { GRAPH_W } else { 0 };
+    let graph_panel_width = ui.graph_width.get().clamp(GRAPH_MIN_W, GRAPH_MAX_W);
+    let graph_width = if graph_visible { graph_panel_width } else { 0 };
     let total_width = graph_width + splitter_width;
 
     ui.standard_panel.show(!scientific);
@@ -2205,6 +2108,8 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
     // after this guard is released.
     ui.splitter_adjusting.set(true);
     unlock_frame_size(&ui.frame);
+    platform::enable_frame_resizing(ui.frame.get_handle());
+    let fit_before_children = frontend::fit_frame_before_child_layout();
 
     if !history_visible && ui.history_split.get() {
         if ui.splitter.unsplit(Some(&ui.history_panel.panel)) {
@@ -2216,7 +2121,12 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
 
     // The root surface owns the optional Graph pane plus the existing
     // Calculator/History splitter. The Calculator pane remains fixed-size.
-    fit_frame_to_surface(&ui.frame, &ui.root_surface, total_width, height);
+    // wxMSW's native DPI fitter must run before child HWND positioning, while
+    // wxGTK must first shrink hidden/active children or GTK will preserve the
+    // previous Scientific-mode minimum allocation and leave empty space.
+    if fit_before_children {
+        fit_frame_to_surface(&ui.frame, &ui.root_surface, total_width, height);
+    }
 
     let graph_x_pixels = platform::scale_classic_control_metric(
         ui.root_surface.get_handle(),
@@ -2232,26 +2142,37 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
     );
     if graph_visible {
         ui.graph_panel.panel.show(true);
-        let _ = platform::set_window_rect_pixels(
+        let graph_positioned = platform::set_window_rect_pixels(
             ui.graph_panel.panel.get_handle(),
             0,
             0,
             graph_x_pixels.max(1),
             height_pixels.max(1),
         );
+        if !graph_positioned {
+            frontend::position_graph_panel(&ui.graph_panel.panel, graph_panel_width, height);
+        }
         if !layout_graph_panel_pixels(&ui.graph_panel) {
-            layout_graph_panel_logical(&ui.graph_panel, GRAPH_W, height);
+            layout_graph_panel_logical(&ui.graph_panel, graph_panel_width, height);
         }
     } else {
         ui.graph_panel.panel.show(false);
     }
-    let _ = platform::set_window_rect_pixels(
+    let splitter_positioned = platform::set_window_rect_pixels(
         ui.splitter.get_handle(),
         graph_x_pixels,
         0,
         splitter_width_pixels.max(1),
         height_pixels.max(1),
     );
+    if !splitter_positioned {
+        frontend::position_splitter(
+            &ui.splitter,
+            graph_width,
+            splitter_width,
+            height,
+        );
+    }
 
     if history_visible {
         ui.history_panel.panel.show(true);
@@ -2268,6 +2189,9 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
         if ui.history_split.get() {
             ui.splitter.set_sash_position(sash, true);
         }
+        // Splitting can reorder native children; keep the custom boundary above
+        // both panes so it fully covers wxGTK's themed sash.
+        ui.history_panel.separator.raise();
     }
 
     // wxSplitterWindow owns calculator_host's rectangle.  Only the active
@@ -2285,6 +2209,17 @@ fn sync_mode_surface(ui: &Ui, mode: Mode) {
                 size.height.max(1),
             );
         }
+    }
+
+    // Force the nested splitter allocation before asking GTK to shrink the
+    // top-level frame.  This is the critical reverse transition: without it,
+    // the old Scientific child request can keep the Standard frame oversized.
+    ui.splitter.layout();
+    ui.root_surface.layout();
+    if !fit_before_children {
+        fit_frame_to_surface(&ui.frame, &ui.root_surface, total_width, height);
+        ui.splitter.layout();
+        ui.root_surface.layout();
     }
 
     platform::disable_frame_resizing(ui.frame.get_handle());
@@ -2486,7 +2421,8 @@ fn export_graph(ui: &Ui) {
         &root_summary,
     );
     if let Err(error) = export_result {
-        platform::message(
+        frontend::show_modal_message(
+            &ui.frame,
             strings.calculator_title(),
             &format!("{}: {error}", strings.graph_export_error()),
         );
@@ -2683,17 +2619,7 @@ fn bind_companion_tracking(ui: &Rc<Ui>) {
                 // This updates Statistics' active appearance/z-order without
                 // moving it or stealing real keyboard focus.
                 set_statistics_application_active(&ui_c, activation.is_active());
-                #[cfg(target_os = "windows")]
-                if activation.is_active()
-                    && !platform::has_keyboard_focus(ui_c.graph_panel.expression.get_handle())
-                {
-                    // TranslateAcceleratorA in the original message loop is
-                    // independent of child focus. wxEVT_CHAR is not, so make
-                    // the frame the keyboard sink whenever Calculator itself
-                    // becomes active. Preserve the graph TextCtrl when the user
-                    // is deliberately editing an expression there.
-                    ui_c.frame.set_focus();
-                }
+                frontend::restore_main_keyboard_focus(&ui_c, activation.is_active());
             }
             event.skip(true);
         });
@@ -2717,7 +2643,8 @@ fn bind_companion_tracking(ui: &Rc<Ui>) {
 }
 
 fn layout_graph_panel_logical(graph: &GraphPanel, width: i32, height: i32) {
-    let content_w = (width - 2 * GRAPH_MARGIN - GRAPH_SEPARATOR_W).max(1);
+    let separator_width = frontend::graph_separator_width();
+    let content_w = (width - 2 * GRAPH_MARGIN - separator_width).max(1);
     let field_y = GRAPH_MARGIN + GRAPH_LABEL_H;
     let expression_w = (content_w - GRAPH_PLOT_W - GRAPH_GAP).max(1);
     let button_y = (height - GRAPH_MARGIN - GRAPH_BUTTON_H).max(field_y + GRAPH_FIELD_H);
@@ -2726,7 +2653,7 @@ fn layout_graph_panel_logical(graph: &GraphPanel, width: i32, height: i32) {
     let canvas_h = (roots_y - GRAPH_GAP - canvas_y).max(8);
     let border = 2;
 
-    graph.separator.set_size_with_pos((width - GRAPH_SEPARATOR_W).max(0), 0, GRAPH_SEPARATOR_W, height.max(1));
+    graph.separator.set_size_with_pos((width - separator_width).max(0), 0, separator_width, height.max(1));
     graph.function_label.set_size_with_pos(GRAPH_MARGIN, GRAPH_MARGIN, content_w, GRAPH_LABEL_H);
     graph.expression.set_size_with_pos(GRAPH_MARGIN, field_y, expression_w, GRAPH_FIELD_H);
     graph.plot_button.set_size_with_pos(GRAPH_MARGIN + expression_w + GRAPH_GAP, field_y, GRAPH_PLOT_W, GRAPH_FIELD_H);
@@ -2734,7 +2661,7 @@ fn layout_graph_panel_logical(graph: &GraphPanel, width: i32, height: i32) {
     graph.canvas.set_size_with_pos(GRAPH_MARGIN + border, canvas_y + border, (content_w - 2 * border).max(1), (canvas_h - 2 * border).max(1));
     graph.roots.set_size_with_pos(GRAPH_MARGIN, roots_y, content_w, GRAPH_ROOTS_H);
     graph.reset_button.set_size_with_pos(GRAPH_MARGIN, button_y, GRAPH_BUTTON_W, GRAPH_BUTTON_H);
-    graph.export_button.set_size_with_pos((width - GRAPH_MARGIN - GRAPH_SEPARATOR_W - GRAPH_BUTTON_W).max(GRAPH_MARGIN), button_y, GRAPH_BUTTON_W, GRAPH_BUTTON_H);
+    graph.export_button.set_size_with_pos((width - GRAPH_MARGIN - separator_width - GRAPH_BUTTON_W).max(GRAPH_MARGIN), button_y, GRAPH_BUTTON_W, GRAPH_BUTTON_H);
 }
 
 fn layout_graph_panel_pixels(graph: &GraphPanel) -> bool {
@@ -2750,7 +2677,7 @@ fn layout_graph_panel_pixels(graph: &GraphPanel) -> bool {
     let button_h = scale(GRAPH_BUTTON_H);
     let roots_h = scale(GRAPH_ROOTS_H);
     let gap = scale(GRAPH_GAP);
-    let separator_w = scale(GRAPH_SEPARATOR_W).max(2);
+    let separator_w = scale(frontend::graph_separator_width()).max(2);
     let content_w = (width - 2 * margin - separator_w).max(1);
     let field_y = margin + label_h;
     let expression_w = (content_w - plot_w - gap).max(1);
@@ -2792,8 +2719,17 @@ fn layout_history_panel_logical(ui: &Ui, history: &HistoryPanel, width: i32, hei
     // Centre the decorative rule over the native sash boundary instead of
     // placing it entirely on the Calculator side. At high DPI this moves it
     // roughly two physical pixels to the right without changing the sash.
-    let separator_x = (ui.splitter.sash_position() - HISTORY_SEPARATOR_W / 2).max(0);
-    history.separator.set_size_with_pos(separator_x, 0, HISTORY_SEPARATOR_W, height.max(1));
+    let separator_width = frontend::history_separator_width();
+    let separator_x = frontend::history_separator_x(
+        ui.splitter.sash_position(),
+        separator_width,
+    );
+    history.separator.set_size_with_pos(
+        separator_x,
+        0,
+        separator_width,
+        height.max(1),
+    );
     history.title.set_size_with_pos(margin, margin, content_w, header_h);
     history.text.set_size_with_pos(margin, text_y, content_w, text_h);
     history.clear_button.set_size_with_pos(button_x, button_y, button_w, button_h);
@@ -2815,10 +2751,11 @@ fn layout_history_panel_pixels(ui: &Ui, history: &HistoryPanel) -> bool {
     let button_y = (height - button_bottom - button_h).max(text_y + gap + 1);
     let text_h = (button_y - gap - text_y).max(1);
     let button_x = (width - margin - button_w).max(margin);
-    let separator_w = scale(HISTORY_SEPARATOR_W).max(2);
-    // Keep the rule centred over the sash. Since separator_w is DPI-scaled,
-    // the half-width adjustment is about two device pixels at 200% scaling.
-    let separator_x = (ui.splitter.sash_position() - separator_w / 2).max(0);
+    let separator_w = scale(frontend::history_separator_width()).max(2);
+    let separator_x = frontend::history_separator_x(
+        ui.splitter.sash_position(),
+        separator_w,
+    );
 
     platform::set_window_rect_pixels(
         history.separator.get_handle(),
@@ -2853,19 +2790,7 @@ fn unlock_frame_size(frame: &Frame) {
 }
 
 fn lock_frame_size(frame: &Frame) {
-    // On Windows, do not reintroduce wx min/max sizing: its logical/physical DPI
-    // conversion was the source of the earlier cropped-window regression. The native
-    // ThickFrame/MaximizeBox removal is sufficient there. wxGTK does not have that
-    // Win32 non-client style, so equal min/max sizes provide the fixed-window policy.
-    #[cfg(target_os = "windows")]
-    let _ = frame;
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let size = frame.get_size();
-        frame.set_min_size(size);
-        frame.set_max_size(size);
-    }
+    frontend::lock_frame_size(frame);
 }
 
 fn fit_frame_to_surface<W: WxWidget>(
@@ -2888,9 +2813,7 @@ fn fit_frame_to_surface<W: WxWidget>(
         logical_width,
         logical_height,
     ) {
-        // Portable fallback. Windows uses the native path above.
-        frame.set_client_size(Size::new(logical_width, logical_height));
-        surface.set_size(Size::new(logical_width, logical_height));
+        frontend::fit_frame_fallback(frame, surface, logical_width, logical_height);
     }
 }
 
@@ -3187,13 +3110,8 @@ fn open_stats_box(ui: &Rc<Ui>) {
     if let Some(stats) = ui.stats_box.borrow().as_ref() {
         stats.frame.show(true);
         stats.frame.raise();
-        // wxFrame::SetFocus can focus a descendant without making this owned
-        // top-level HWND the active/foreground window on wxMSW. Activate the
-        // native Statistics window explicitly, then let wx choose its focus
-        // target. The Calculator-side WM_MOUSEACTIVATE guards can now reliably
-        // preserve that activation while Calculator controls are clicked.
-        platform::activate_statistics_companion(stats.frame.get_handle());
-        stats.frame.set_focus();
+
+        frontend::focus_statistics(ui, stats);
     }
     set_statistics_application_active(ui, true);
     refresh_stats(ui);
@@ -3308,7 +3226,7 @@ fn show_open_stats_box(ui: &Ui) {
 fn build_stats_box(ui: &Rc<Ui>) -> StatsBox {
     let width = sb_x(146);
     let height = sb_y(86);
-    let font = classic_font(FontWeight::Normal);
+    let font = frontend::classic_font(FontWeight::Normal);
 
     let frame = Frame::builder()
         .with_parent(&ui.frame)
@@ -3320,7 +3238,7 @@ fn build_stats_box(ui: &Rc<Ui>) -> StatsBox {
         WindowStyle::ThickFrame | WindowStyle::MaximizeBox | WindowStyle::MinimizeBox,
     );
     frame.set_font(&font);
-    use_classic_surface(&frame);
+    frontend::apply_surface(&frame);
     platform::set_calculator_icon(frame.get_handle());
     platform::install_context_help_dismissal(frame.get_handle());
     platform::install_companion_activation_guard(ui.frame.get_handle(), frame.get_handle());
@@ -3330,7 +3248,7 @@ fn build_stats_box(ui: &Rc<Ui>) -> StatsBox {
         .with_size(Size::new(width, height))
         .build();
     panel.set_font(&font);
-    use_classic_surface(&panel);
+    frontend::apply_surface(&panel);
     platform::install_context_help_dismissal(panel.get_handle());
 
     let list = ListBox::builder(&panel)
@@ -3405,16 +3323,7 @@ fn build_stats_box(ui: &Rc<Ui>) -> StatsBox {
     // WM_MOUSEACTIVATE/MA_NOACTIVATE guard, so no wx activation repaint hook is
     // installed there. wxGTK still uses its activation event to update the
     // keep-above hint used for the companion window.
-    #[cfg(not(target_os = "windows"))]
-    {
-        let stats_hwnd = frame.get_handle();
-        frame.on_activate(move |event: WindowEventData| {
-            if let WindowEventData::Activate(activation) = &event {
-                platform::set_companion_application_active(stats_hwnd, activation.is_active());
-            }
-            event.skip(true);
-        });
-    }
+    frontend::install_statistics_activation_hook(&frame);
 
     // Closing the box destroys the wx window, which would leave the cached
     // handles in ui.stats_box dangling.  Drop the record instead so the next

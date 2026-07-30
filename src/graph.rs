@@ -1192,6 +1192,7 @@ mod tests {
         assert_eq!(normalize_graph_expression("2x² + 2x + 2").unwrap(), "2*x^2+2*x+2");
         assert_eq!(normalize_graph_expression("2x^2 + 2x + 2").unwrap(), "2*x^2+2*x+2");
         assert_eq!(normalize_graph_expression("2x**2 + 2x + 2").unwrap(), "2*x**2+2*x+2");
+        assert_eq!(normalize_graph_expression("2x**2 + 3x + 10").unwrap(), "2*x**2+3*x+10");
         assert_eq!(normalize_graph_expression("2(x+1)").unwrap(), "2*(x+1)");
         assert_eq!(normalize_graph_expression("(x+1)(x-1)").unwrap(), "(x+1)*(x-1)");
         assert_eq!(normalize_graph_expression("2sqrt(x)").unwrap(), "2*sqrt(x)");
@@ -1201,7 +1202,12 @@ mod tests {
 
     #[test]
     fn plots_quadratics_with_caret_double_star_or_superscript_notation() {
-        for expression in ["2x² + 2x + 2", "2x^2 + 2x + 2", "2x**2 + 2x + 2"] {
+        for expression in [
+            "2x² + 2x + 2",
+            "2x^2 + 2x + 2",
+            "2x**2 + 2x + 2",
+            "2x**2 + 3x + 10",
+        ] {
             let mut model = GraphModel::default();
             model.plot(expression, context()).unwrap();
             assert!(model.has_plot(), "{expression}");

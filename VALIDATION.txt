@@ -1,4 +1,4 @@
-v1.1.10 buildfix76
+v1.1.10 buildfix85
 
 Original executable audit
 -------------------------
@@ -42,7 +42,24 @@ PASS: every recovered source error key has English, Portuguese, and Spanish runt
 PASS: localization regression coverage iterates all eight recovered strings in all three languages.
 PASS: source-level regression tests were added for the recovered math categories, tangent guard, base-conversion sign split, statistics behavior, binary overflow guards, inverse power/root zero, and memory-add overflow.
 PASS: UTF-8 and balanced (), [], {} scan completed across every Rust source file while ignoring comments/string/char/raw literals.
-PASS: BinaryOp::Root is wired through calc.rs, ui.rs help mapping, and expr.rs parsing.
+PASS: BinaryOp::Root is wired through calc.rs, ui/mod.rs help mapping, and expr.rs parsing.
+
+Buildfix78 platform-separated frontend architecture
+---------------------------------------------------
+PASS: the obsolete mixed-platform src/ui.rs, src/platform.rs, and src/locale.rs files are absent.
+PASS: src/ui/mod.rs contains shared calculator construction, actions, History, Graph, and Statistics behavior; it selects exactly one backend module and contains no target-specific widget or OS API implementation.
+PASS: src/ui/windows.rs contains wxMSW-only theming, decorator construction, selector notification bridging, native-message routing, DPI fallback, and Statistics focus policy.
+PASS: src/ui/linux.rs contains wxGTK-only surface/font policy, sash-safe History separator construction, logical pane sizing, synchronous modal dialogs, and Calculator-retained Statistics focus.
+PASS: src/ui/other.rs provides the portable fallback without importing Windows or GTK APIs.
+PASS: src/platform/mod.rs exposes one shared integration facade and shared localized Help-file selection; Win32/USER32/GDI code is confined to src/platform/windows.rs, GTK3 code is confined to src/platform/linux.rs, and portable stubs are confined to src/platform/other.rs.
+PASS: Linux native Help-viewer executable-bit validation remains covered by a Linux-backend unit test; selected-language Help fallback tests remain in the shared platform module.
+PASS: src/locale/mod.rs contains canonical/display conversion only; Windows NLS, glibc LC_NUMERIC, and invariant fallback discovery are isolated in separate backend files.
+PASS: Windows, Linux, and fallback UI backends expose the same 17-function frontend facade.
+PASS: Windows, Linux, and fallback platform backends expose the same public integration function set.
+PASS: tools/check_platform_separation.py accepts the tree and verifies backend facade parity, target-neutral shared modules, and absence of the obsolete mixed source files.
+PASS: tools/check_rust_delimiters.py accepts all 22 Rust source files.
+PASS: bash -n accepts build.sh and clean-linux.sh; every Python helper compiles with py_compile.
+PASS: the refactor intentionally preserves the existing buildfix77 behavior; no calculator arithmetic, parser, graph model, persistence format, Help payload, or Windows visual policy was changed.
 
 Runtime/toolchain limitation
 ----------------------------
@@ -94,7 +111,7 @@ PASS: src/calculation_log.rs regression tests cover newest-first ordering, bound
 
 Buildfix36 detached History companion checks (historical; superseded by buildfix40)
 ------------------------------------------------------------------------------------
-PASS: src/ui.rs no longer contains the buildfix35 `surface_panel`/combined-width architecture.
+PASS: src/ui/mod.rs no longer contains the buildfix35 `surface_panel`/combined-width architecture.
 PASS: Calculator startup width is STD_W unconditionally; HISTORY_W is never added to the Calculator frame width.
 PASS: Standard and Scientific Calculator panels are once again direct children of the Calculator frame, matching the pre-History buildfix34 architecture.
 PASS: History is created as a separate wxDragon Frame with Calculator as its owner/parent and without normal caption/taskbar chrome.
@@ -154,7 +171,7 @@ Runtime/toolchain limitation is unchanged: cargo/rustc/rustfmt and a Windows run
 
 Buildfix40 native splitter checks
 ---------------------------------
-PASS: History is no longer a separate top-level Frame. src/ui.rs creates one Calculator Frame containing one wxDragon SplitterWindow, with calculator_host as the left child and history_panel.panel as the right child.
+PASS: History is no longer a separate top-level Frame. src/ui/mod.rs creates one Calculator Frame containing one wxDragon SplitterWindow, with calculator_host as the left child and history_panel.panel as the right child.
 PASS: the splitter uses SplitterWindowStyle::Vertical so Calculator and History are true adjacent panes inside one client area; the obsolete Win32 position_history_companion helper and all History sidecar HWND positioning code are absent.
 PASS: LiveUpdate is intentionally omitted. The native splitter therefore presents the classic drag guide while moving the sash; Calculator controls are not continuously clipped/reflowed during a drag.
 PASS: Standard and Scientific panels remain fixed-layout children of calculator_host at their recovered coordinates. Only the active Calculator panel is explicitly sized after a split/mode change.
@@ -629,3 +646,113 @@ PASS: no TOPICLINK header crosses a transformed 4,084-byte data-block boundary.
 PASS: |CONTEXT, |TopicId, |SYSTEM contents offsets, TOPICPOS links, and TOPICOFFSET links are translated through the rebuilt stream.
 PASS: tools/repad_help_tables.py now delegates command-line regeneration to the row-safe generator.
 PASS: no calculator runtime code changed in this build.
+
+Buildfix77 Linux-only UI, sizing, modal-dialog, and script checks
+----------------------------------------------------------------
+PASS: all buildfix77 palette, font, splitter-decoration, Statistics-focus, modal-dialog, and GTK sizing behavior now resides in src/ui/linux.rs or src/platform/linux.rs, selected only for target_os = "linux".
+PASS: Windows continues to use Microsoft Sans Serif, its native button-face colour and control painters, platform::message/MessageBoxW, the existing Statistics foreground-activation path, the splitter-boundary overlay, and the native realized-HWND sizing helper.
+PASS: buildfix79 supersedes the earlier warm buildfix77 face: Linux calculator surfaces and GTK button/field CSS now use exact RGB(240,240,240) / #f0f0f0, while Linux continues to request Liberation Sans.
+PASS: on Linux the decorative History separator is a child of the History pane at x=0 instead of a child over the wxSplitterWindow sash, leaving the native sash available for drag input.
+PASS: Linux no longer applies asynchronous equal min/max geometry hints after every layout; gtk_window_set_resizable(false) prevents user resizing while the explicit surface/client sizing and layout/update pass preserve programmatic Standard, Scientific, Graph, and History size changes.
+PASS: Graph visibility remains mode-independent and sync_mode_surface includes GRAPH_W for both Standard and Scientific modes; Linux additionally falls back to logical set_size_with_pos rectangles for the Graph panel and Calculator/History splitter when the Win32-only pixel helper returns false.
+PASS: opening Statistics on Linux raises the utility window but restores keyboard focus to Calculator; the Windows companion activation/focus implementation is isolated in src/ui/windows.rs and unchanged in behavior.
+PASS: Linux About, Help failures, settings errors, clipboard errors, and graph-export errors use a parent-owned synchronous wxDragon MessageDialog in src/ui/linux.rs. Windows routes the same shared requests through its native platform::message implementation.
+PASS: Linux Help discovery requires an executable extensionless hlp-viewer beside OpenCalc; a Linux-only regression test covers missing and executable permission states.
+PASS: the supplied build.sh is incorporated, packages OpenCalc/runtime files into build-linux, and intentionally excludes hlp-viewer.exe.
+PASS: clean-linux.sh removes target, build-linux, a root OpenCalc test binary, and Zone.Identifier marker files without deleting source, Help files, or viewer inputs.
+PASS: bash -n accepts build.sh and clean-linux.sh. Python helper sources compile successfully. UTF-8 and Rust delimiter scans pass.
+
+Runtime/toolchain limitation
+----------------------------
+This artifact environment does not contain cargo, rustc, or a wxGTK display, so no local Rust compilation or live Linux GUI smoke test is claimed. The source changes were statically inspected against wxDragon 0.9.17 APIs, and the scripts were syntax-checked. Run ./build.sh in the prepared WSL toolchain for the authoritative compile and UI test.
+
+
+
+Buildfix79 Linux clipboard and neutral-face checks
+-------------------------------------------------
+PASS (source review): Linux copy_text uses the GTK3 default clipboard, publishes UTF-8 display text, and asks the desktop clipboard manager to retain the copied value.
+PASS (source review): Linux paste_text synchronously requests UTF-8 text, returns None for an empty/non-text clipboard, converts the GLib buffer before releasing it with g_free, and then uses the existing shared paste-expression path.
+PASS: the recovered Cannot open Clipboard. string is used when no GTK display or default clipboard is available.
+PASS: the Linux wx surface colour is exactly RGB(240,240,240), and Linux GTK button/field faces are exactly #f0f0f0.
+PASS: the former warm #d4d0c8 and #ece9d8 shades are absent from src/ui/linux.rs and src/platform/linux.rs.
+PASS: all buildfix79 runtime changes remain confined to Linux backend files; Windows clipboard and frontend source files are byte-for-byte unchanged from buildfix78.
+PASS: tools/check_platform_separation.py confirms matching backend facades and target-neutral shared modules; tools/check_rust_delimiters.py accepts all 22 Rust source files.
+PASS: build.sh and clean-linux.sh pass shell syntax checks, and clean-linux.sh passes an isolated removal/preservation test.
+PASS: the required GTK3, GDK3, and GLib clipboard/display/free symbols are present in the Linux runtime libraries available to this validation environment.
+LIMITATION: cargo, rustc, and a wxGTK display are unavailable in this artifact environment, so the authoritative WSL compilation and live clipboard/UI smoke test must be run with ./build.sh.
+
+Buildfix80 Linux layout validation
+----------------------------------
+PASS: Linux programmatic mode/pane transitions temporarily re-enable GTK resizing and restore the non-resizable policy after the exact client allocation is applied.
+PASS: wxGTK child panes and the nested History splitter are laid out before the top-level frame is shrunk, preventing the previous Scientific allocation from leaving blank space in Standard mode.
+PASS: Graph/History show-hide transitions use the same complete surface recalculation path as Standard/Scientific transitions.
+PASS: History remains a native draggable wxSplitterWindow pane; Graph gains a Linux-only captured separator drag handle with bounded width.
+PASS: Windows frontend sizing order, fixed Graph width, DPI fitter, palette, and native splitter policy are unchanged.
+PASS: tools/check_platform_separation.py accepts matching UI/platform/locale backend facades.
+PASS: tools/check_rust_delimiters.py accepts all Rust source files.
+NOT RUN HERE: authoritative Cargo compilation and live wxGTK interaction test; this execution environment has no Rust toolchain or GTK/wxGTK development packages.
+
+Buildfix81 focus-aware Graph clipboard validation
+-------------------------------------------------
+PASS (source review): the shared Copy/Paste command checks the native Graph Function editor's keyboard focus before invoking the numeric calculator clipboard path.
+PASS (source review): focused Function-field Paste replaces the active selection or inserts at the caret and returns without numeric evaluation or Calculation History insertion.
+PASS (source review): focused Function-field Copy exports only the selected editor text and is a no-op when there is no selection, matching native single-line editor behavior.
+PASS: Linux implements the editor bridge through GTK3 GtkEditable selection, deletion, insertion, and caret APIs; buildfix82 now supplies the equivalent wxMSW bridge, while the portable backend retains its no-op contract fallback.
+PASS: Graph normalization regression coverage includes `2x**2 + 3x + 10` -> `2*x**2+3*x+10`, and plotting regression coverage includes the same polynomial.
+PASS: the numeric Calculator paste path remains unchanged whenever the Function editor does not own focus on either native frontend; a free variable is not silently assigned a value.
+PASS: tools/check_platform_separation.py accepts matching UI/platform/locale backend facades and target-neutral shared modules.
+PASS: tools/check_rust_delimiters.py accepts all Rust source files; build.sh and clean-linux.sh pass shell syntax checks.
+NOT RUN HERE: authoritative Cargo compilation and live wxGTK/wxMSW clipboard interaction tests; this execution environment has no Rust toolchain or wxWidgets development environment.
+
+
+
+Buildfix82 cross-platform Graph clipboard validation
+----------------------------------------------------
+PASS (source review): Windows editable_owns_clipboard now uses the same exact-child keyboard-focus rule as Linux, so frame-level Copy/Paste accelerators defer to the focused Graph Function field.
+PASS (source review): the wxMSW editor bridge reads 32-bit selection positions with EM_GETSEL, slices the native UTF-16 window text on code-unit boundaries, and returns no text when the selection is empty.
+PASS (source review): Windows Paste uses EM_REPLACESEL with undo enabled, replacing the active selection or inserting at the caret without evaluating the polynomial or adding a Calculation History entry.
+PASS: Linux GtkEditable behavior remains unchanged, and the portable backend retains its no-op contract fallback.
+PASS: shared UI logic contains no new target-specific API and continues to use the platform facade for both native frontends.
+PASS: tools/check_platform_separation.py accepts matching UI/platform/locale backend facades and target-neutral shared modules.
+PASS: tools/check_rust_delimiters.py accepts all Rust source files; build.sh and clean-linux.sh pass shell syntax checks.
+NOT RUN HERE: authoritative Cargo compilation and live wxMSW/wxGTK clipboard interaction tests; this execution environment has no Rust toolchain or wxWidgets development environment.
+
+
+Buildfix83 Linux Statistics transient/z-order validation
+--------------------------------------------------------
+PASS (source review): install_companion_activation_guard explicitly calls gtk_window_set_transient_for with Calculator as owner and marks Statistics as a utility omitted from the task switcher.
+PASS (historical buildfix83 review): transient ownership is retained; buildfix84 supersedes the raise-only policy with an active-application keep-above guard that is removed when the complete OpenCalc window group becomes inactive.
+PASS (source review): owner/utility synchronization raises the realized GDK window through gdk_window_raise, which changes z-order without requesting keyboard activation.
+PASS (source review): the Statistics activation hook ignores deactivation instead of lowering the utility; this removes the owner-active/companion-inactive event-order race observed when Calculator is clicked.
+PASS (source review): Linux focus_statistics returns keyboard focus to Calculator and then reasserts Statistics stacking without activating it.
+PASS: the required gtk_window_set_transient_for, gtk_window_set_skip_taskbar_hint, gtk_widget_get_window, and gdk_window_raise symbols are present in the GTK3/GDK3 runtime libraries available to this validation environment.
+PASS: Windows frontend/platform sources are byte-for-byte unchanged from buildfix82.
+PASS: tools/check_platform_separation.py accepts matching backend facades and target-neutral shared modules.
+PASS: tools/check_rust_delimiters.py accepts all Rust source files; build.sh and clean-linux.sh pass shell syntax checks.
+NOT RUN HERE: authoritative Cargo compilation and live wxGTK window-manager interaction test; this execution environment has no Rust toolchain or wxWidgets/GTK development packages.
+
+Buildfix84 Linux Statistics no-dip validation
+---------------------------------------------
+PASS (source review): install_companion_activation_guard enables gtk_window_set_keep_above before Statistics is shown, eliminating the interval in which a Calculator control click could raise the owner above the utility.
+PASS (source review): active OpenCalc window notifications keep the above hint armed and reaffirm native GDK stacking without activating Statistics or stealing Calculator keyboard focus.
+PASS (source review): deactivation is deferred with g_idle_add_full; the idle callback checks gtk_window_is_active for both Statistics and its gtk_window_get_transient_for owner, so focus transfers inside OpenCalc retain the hint.
+PASS (source review): the retained GtkWindow is protected with g_object_ref/g_object_unref until the idle callback finishes; gtk_widget_in_destruction and gtk_widget_get_realized prevent a deferred restack from touching a closed native window.
+PASS (source review): when neither OpenCalc top-level is active, the idle callback removes the keep-above hint, so unrelated applications can cover the complete OpenCalc group.
+PASS: the required gtk_window_set_keep_above, gtk_window_get_transient_for, gtk_window_is_active, gtk_widget_in_destruction, gtk_widget_get_realized, g_idle_add_full, g_object_ref, and g_object_unref symbols are available in the GTK3/GLib/GObject runtime libraries used for static validation.
+PASS: Windows frontend/platform sources remain byte-for-byte unchanged from buildfix83.
+PASS: tools/check_platform_separation.py accepts matching backend facades and target-neutral shared modules.
+PASS: tools/check_rust_delimiters.py accepts all Rust source files; build.sh and clean-linux.sh pass shell syntax checks.
+NOT RUN HERE: authoritative Cargo compilation and live wxGTK window-manager interaction test; this execution environment has no Rust toolchain or wxWidgets/GTK development packages.
+
+
+
+Buildfix85 Linux separator and group-frame validation
+------------------------------------------------------
+PASS (source review): Linux creates the History decoration as a splitter-level custom drag handle, covering the desktop-themed native sash instead of leaving the warm RGB(205,199,194) strip visible.
+PASS (source review): the visible Linux History handle captures pointer input and persists bounded History widths on release, so covering the native sash does not remove pane resizing.
+PASS: Linux requests wxDragon's ThinSash only underneath the custom handle; Windows and fallback frontends retain their previous Vertical splitter style.
+PASS: Linux splitter and separator GTK styles use the exact neutral #f0f0f0 face, with the etched dark/light rule matching the Graph boundary.
+PASS: Linux selector/command group rectangles now use one 1px etched border with no second inset black top/left band, making the upper edge the same thickness as the remaining edges.
+PASS: Windows frontend and classic group-box painter behavior are unchanged.
+PASS: tools/check_platform_separation.py accepts matching backend facades; tools/check_rust_delimiters.py accepts all Rust source files.
+NOT RUN HERE: authoritative Cargo compilation and live wxGTK rendering/drag test; this execution environment has no Rust toolchain or wxWidgets/GTK development packages.
