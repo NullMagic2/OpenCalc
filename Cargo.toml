@@ -4,7 +4,7 @@ version = "1.1.10"
 edition = "2021"
 build = "build.rs"
 authors = ["Reverse-engineered clean-room reimplementation"]
-description = "OpenCalc: a Windows 95 Calculator reimplementation with wxDragon and a corrected expression parser"
+description = "OpenCalc: a Windows 95 Calculator reimplementation with native Windows and GTK4 interfaces"
 license = "MIT"
 
 [[bin]]
@@ -12,9 +12,18 @@ name = "OpenCalc"
 path = "src/main.rs"
 
 [dependencies]
-wxdragon = "=0.9.17"
 plotters = "=0.3.7"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wxdragon = "=0.9.17"
 plotters-wxdragon = "=0.1.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { package = "gtk4", version = "0.11.4", features = ["v4_10"] }
+plotters-cairo = "=0.9.0"
+gdk4-x11 = "0.11.4"
+x11rb = "=0.13.2"
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "file_chooser", "gtk4_x11"] }
 
 [build-dependencies]
 winresource = "=0.1.31"

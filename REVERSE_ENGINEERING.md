@@ -119,6 +119,8 @@ The supplied `CALC.HLP` contains a contiguous context-help topic run beginning a
 
 Buildfix9 intentionally does not link the Calculator to the HLP parser. Those decoded strings are retained in editable UTF-8 `calc.tooltip`, keyed by semantic control names. The wxDragon controls receive native Windows `WM_CONTEXTMENU` subclasses. The subclass uses a real popup menu for **What's This?** and a tracking `tooltips_class32` control for the pale-yellow context popup. This preserves the original interaction model while keeping full Help/F1 delegated to the platform-native HLP viewer (`hlp-viewer.exe CALC.HLP` on Windows; `hlp-viewer CALC.HLP` on Linux).
 
+Buildfix97 gives Linux the same explicit right-click → **What's This?** → popup interaction without emulating Win32 or adding a second GUI toolkit abstraction. The wxGTK handles are native `GtkWidget` pointers. One reusable `GtkMenu` supplies the localized command, and one temporary undecorated `GTK_WINDOW_POPUP` renders the selected catalog text with the recovered pale-yellow/black presentation. Ordinary controls receive one button-event signal; parent panels perform a small rectangle hit test only for no-window GTK labels. The popup is destroyed on Calculator clicks, Escape, deactivation, menu operations, or direct clicks on the popup.
+
 ## Locale decimal handling — buildfix10
 
 The recovered clipboard character table in the Windows 95 reference maps both `.` and `,` to the calculator's decimal-point command. The Rust UI therefore accepts both punctuation characters as decimal input instead of binding parsing to one hard-coded symbol.
@@ -294,3 +296,10 @@ ordinary button.
 ## Buildfix68 accelerator focus correction
 
 The recovered CALC.EXE message loop calls `TranslateAcceleratorA` for the top-level Calculator before normal message translation/dispatch. That is why the original accepts calculator keys immediately after the main window becomes active and why keyboard activation is not tied to CE or any other child button. OpenCalc therefore makes the frame the ordinary keyboard sink on initial show/reactivation (except while the graph expression editor deliberately owns focus) and routes those keys through the same calculator actions as mouse clicks. Keyboard actions also pulse the corresponding button face to reproduce the original visible key feedback.
+
+## Buildfix127: Statistics commands terminate the current numeric entry
+
+The supplied 59,392-byte Windows 95 `CALC.EXE` was checked again (SHA-256 `b064b0ac430264eff7b79b91e743bcd36d7b3707857f5bcdc4db146911dd0e28`). The main command dispatcher accepts the four Statistics operation codes `0x75` through `0x78` at `0x00402D68`. The `Dat` branch (`0x78`) stores the current double in the dataset at `0x00402207..0x004022EA` and increments the datum count. After the Statistics routine returns, the common path writes zero to the numeric entry-in-progress state at `0x00402DA4`.
+
+That write explains the visible behavior: `Dat` does not erase the number that was just stored, but the next digit replaces the display instead of being appended to it. The same common reset runs after `Ave`, `Sum`, and `s`. OpenCalc now mirrors that state transition in the shared `Calculator` model by ending the current entry and clearing its explicit decimal-entry bit after every Statistics command. Both frontends therefore inherit the behavior without separate event-handler code.
+

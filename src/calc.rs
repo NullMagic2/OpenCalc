@@ -345,37 +345,56 @@ impl Calculator {
         self.entering = false;
     }
 
-    pub fn stat_dat(&mut self) { if let Ok(v) = self.value() { self.stats.push(v); } }
+    pub fn stat_dat(&mut self) {
+        if let Ok(value) = self.value() {
+            self.stats.push(value);
+        }
+        self.finish_statistics_action();
+    }
+
     pub fn stat_sum(&mut self) {
         let sum = self.stats.iter().copied().sum::<f64>();
         match checked_large(sum) {
             Ok(value) => self.set_value(value),
             Err(error) => self.fail(&error),
         }
+        self.finish_statistics_action();
     }
+
     pub fn stat_avg(&mut self) {
         if self.stats.is_empty() {
             self.fail(DIVIDE_BY_ZERO);
-            return;
+        } else {
+            let sum = self.stats.iter().copied().sum::<f64>();
+            match checked_large(sum / self.stats.len() as f64) {
+                Ok(value) => self.set_value(value),
+                Err(error) => self.fail(&error),
+            }
         }
-        let sum = self.stats.iter().copied().sum::<f64>();
-        match checked_large(sum / self.stats.len() as f64) {
-            Ok(value) => self.set_value(value),
-            Err(error) => self.fail(&error),
-        }
+        self.finish_statistics_action();
     }
+
     pub fn stat_stddev(&mut self) {
         if self.stats.len() <= 1 {
             self.set_value(0.0);
-            return;
+        } else {
+            let mean = self.stats.iter().sum::<f64>() / self.stats.len() as f64;
+            let variance = self.stats.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>()
+                / (self.stats.len() - 1) as f64;
+            match checked_large(variance.sqrt()) {
+                Ok(value) => self.set_value(value),
+                Err(error) => self.fail(&error),
+            }
         }
-        let mean = self.stats.iter().sum::<f64>() / self.stats.len() as f64;
-        let variance = self.stats.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>()
-            / (self.stats.len() - 1) as f64;
-        match checked_large(variance.sqrt()) {
-            Ok(value) => self.set_value(value),
-            Err(error) => self.fail(&error),
-        }
+        self.finish_statistics_action();
+    }
+
+    /// CALC.EXE clears its common entry-in-progress flag after every
+    /// Statistics command.  The displayed value remains visible, but the next
+    /// digit starts a fresh entry instead of being appended to that value.
+    fn finish_statistics_action(&mut self) {
+        self.entering = false;
+        self.decimal_entered = false;
     }
 
     pub fn value(&self) -> Result<f64, String> {
@@ -790,6 +809,48 @@ mod locale_tests {
         calc.stat_dat();
         calc.stat_stddev();
         assert_eq!(calc.value().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn win95_dat_makes_the_next_number_a_fresh_entry_in_both_modes() {
+        for mode in [Mode::Standard, Mode::Scientific] {
+            let mut calc = Calculator::default();
+            calc.set_mode(mode);
+
+            calc.digit('1');
+            calc.digit('2');
+            calc.stat_dat();
+            assert_eq!(calc.stats, vec![12.0]);
+            assert_eq!(calc.value().unwrap(), 12.0);
+
+            calc.digit('3');
+            assert_eq!(calc.value().unwrap(), 3.0);
+            calc.stat_dat();
+            assert_eq!(calc.stats, vec![12.0, 3.0]);
+
+            calc.digit('4');
+            assert_eq!(calc.value().unwrap(), 4.0);
+        }
+    }
+
+    #[test]
+    fn every_statistics_command_arms_a_fresh_numeric_entry() {
+        let mut calc = Calculator::default();
+        calc.digit('2');
+        calc.stat_dat();
+        calc.digit('4');
+        calc.stat_dat();
+
+        for action in [
+            Calculator::stat_sum as fn(&mut Calculator),
+            Calculator::stat_avg,
+            Calculator::stat_stddev,
+        ] {
+            calc.digit('9');
+            action(&mut calc);
+            calc.digit('7');
+            assert_eq!(calc.value().unwrap(), 7.0);
+        }
     }
 
     #[test]

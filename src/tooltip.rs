@@ -1,4 +1,4 @@
-//! Plain-text catalog for Win95-style control context help.
+//! Plain-text help catalog used by the Windows and Linux “What’s This?” context-help popups.
 //!
 //! The shipped `calc.tooltip` contains language-qualified sections such as
 //! `[en.back]`, `[pt.back]`, and `[es.back]`.  Adding another translation only
@@ -16,8 +16,8 @@ pub struct TooltipCatalog {
 }
 
 impl TooltipCatalog {
-    /// Loads `calc.tooltip` beside the executable, falling back to the current directory.
-    /// A missing or malformed catalog is non-fatal; controls simply omit context help.
+    /// Loads `calc.tooltip` beside the executable.
+    /// A missing or malformed catalog is non-fatal; controls simply omit help text.
     pub fn load_default() -> Self {
         let Some(path) = find_tooltip_file() else {
             return Self::default();
@@ -30,10 +30,7 @@ impl TooltipCatalog {
 
     pub fn get(&self, language: Language, key: &str) -> Option<&str> {
         let qualified = format!("{}.{}", language.code(), key);
-        self.entries
-            .get(&qualified)
-            .or_else(|| self.entries.get(key)) // compatibility with older catalogs
-            .map(String::as_str)
+        self.entries.get(&qualified).map(String::as_str)
     }
 
     fn parse(text: &str) -> Self {
@@ -87,18 +84,10 @@ impl TooltipCatalog {
 }
 
 fn find_tooltip_file() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("calc.tooltip"));
-            candidates.push(dir.join("CALC.TOOLTIP"));
-        }
-    }
-    if let Ok(dir) = std::env::current_dir() {
-        candidates.push(dir.join("calc.tooltip"));
-        candidates.push(dir.join("CALC.TOOLTIP"));
-    }
-    candidates.into_iter().find(|path| path.is_file())
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    [dir.join("calc.tooltip"), dir.join("CALC.TOOLTIP")]
+        .into_iter()
+        .find(|path| path.is_file())
 }
 
 #[cfg(test)]
@@ -121,9 +110,5 @@ mod tests {
         );
     }
 
-    #[test]
-    fn supports_legacy_unqualified_sections_as_a_fallback() {
-        let catalog = TooltipCatalog::parse("[ce]\nClears entry.\n");
-        assert_eq!(catalog.get(Language::Spanish, "ce"), Some("Clears entry."));
-    }
+
 }

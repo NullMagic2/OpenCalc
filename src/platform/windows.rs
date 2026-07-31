@@ -134,8 +134,6 @@ const WM_KEYDOWN: Uint = 0x0100;
 const WM_TIMER: Uint = 0x0113;
 const VK_ESCAPE: usize = 0x1B;
 const WM_GETFONT: Uint = 0x0031;
-const EM_GETSEL: Uint = 0x00B0;
-const EM_REPLACESEL: Uint = 0x00C2;
 const EM_POSFROMCHAR: Uint = 0x00D6;
 const EM_CHARFROMPOS: Uint = 0x00D7;
 const EM_LINEINDEX: Uint = 0x00BB;
@@ -329,6 +327,15 @@ unsafe extern "system" {
         param: *mut c_void,
     ) -> Hwnd;
     fn DestroyWindow(hwnd: Hwnd) -> Bool;
+}
+
+#[link(name = "uxtheme")]
+unsafe extern "system" {
+    fn SetWindowTheme(
+        hwnd: Hwnd,
+        sub_app_name: *const u16,
+        sub_id_list: *const u16,
+    ) -> i32;
 }
 
 #[link(name = "gdi32")]
@@ -1303,6 +1310,13 @@ unsafe extern "system" fn classic_separator_proc(
     }
 }
 
+pub fn apply_classic_theme(hwnd: *mut c_void) {
+    let empty = [0u16];
+    unsafe {
+        let _ = SetWindowTheme(hwnd, empty.as_ptr(), empty.as_ptr());
+    }
+}
+
 pub fn install_classic_separator_painter(hwnd: *mut c_void) {
     if hwnd.is_null() {
         return;
@@ -1391,21 +1405,16 @@ pub fn install_classic_vertical_separator_painter(hwnd: *mut c_void) {
     }
 }
 
-pub fn make_pointer_passthrough(_hwnd: *mut c_void) {
-    // The Windows vertical-separator subclass already returns HTTRANSPARENT
-    // from WM_NCHITTEST, so splitter input naturally reaches the native sash.
-}
+pub fn install_classic_splitter_painter(_hwnd: *mut c_void) {}
 
 unsafe fn draw_classic_group_box(hwnd: Hwnd, hdc: Hdc) {
     let mut rect = Rect::default();
     if GetClientRect(hwnd, &mut rect) == 0 {
         return;
     }
+
     FillRect(hdc, &rect, GetSysColorBrush(COLOR_BTNFACE));
-    // CALC.EXE's selector/status framing table uses EDGE_ETCHED with
-    // BF_RECT (edge value 0x06, flags 0x0f).
-    let mut edge_rect = rect;
-    DrawEdge(hdc, &mut edge_rect, EDGE_ETCHED, BF_RECT);
+    DrawEdge(hdc, &mut rect, EDGE_ETCHED, BF_RECT);
 }
 
 unsafe extern "system" fn classic_group_proc(
@@ -1449,8 +1458,6 @@ unsafe extern "system" fn classic_group_proc(
         _ => DefSubclassProc(hwnd, message, wparam, lparam),
     }
 }
-
-pub fn install_classic_splitter_painter(_hwnd: *mut c_void) {}
 
 pub fn install_classic_group_box_painter(hwnd: *mut c_void) {
     if hwnd.is_null() {
@@ -1555,65 +1562,6 @@ pub fn pulse_classic_button(hwnd: *mut c_void) {
 /// Calculator top-level window is reactivated.
 pub fn has_keyboard_focus(hwnd: *mut c_void) -> bool {
     !hwnd.is_null() && unsafe { GetFocus() == hwnd as Hwnd }
-}
-
-/// Let the focused native graph editor own the frame-level Copy/Paste
-/// accelerators. wxMSW routes the Graph Function field through a standard
-/// Unicode EDIT control, so its selection and caret can be handled directly.
-pub fn editable_owns_clipboard(hwnd: *mut c_void) -> bool {
-    has_keyboard_focus(hwnd)
-}
-
-/// Return the selected UTF-16 text from a native single-line wxTextCtrl.
-pub fn selected_text(hwnd: *mut c_void) -> Option<String> {
-    if hwnd.is_null() {
-        return None;
-    }
-
-    unsafe {
-        let hwnd = hwnd as Hwnd;
-        let mut start = 0u32;
-        let mut end = 0u32;
-        SendMessageW(
-            hwnd,
-            EM_GETSEL,
-            (&mut start as *mut u32) as usize,
-            (&mut end as *mut u32) as isize,
-        );
-        if start >= end {
-            return None;
-        }
-
-        let len = GetWindowTextLengthW(hwnd).max(0) as usize;
-        let mut text = vec![0u16; len + 1];
-        let copied = GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32).max(0) as usize;
-        let start = (start as usize).min(copied);
-        let end = (end as usize).min(copied);
-        if start >= end {
-            return None;
-        }
-        Some(String::from_utf16_lossy(&text[start..end]))
-    }
-}
-
-/// Replace the current selection, or insert at the caret, in a native
-/// single-line wxTextCtrl. The nonzero wParam keeps the edit undoable.
-pub fn insert_text_at_selection(hwnd: *mut c_void, text: &str) -> bool {
-    if hwnd.is_null() {
-        return false;
-    }
-
-    let mut wide: Vec<u16> = text.encode_utf16().collect();
-    wide.push(0);
-    unsafe {
-        SendMessageW(
-            hwnd as Hwnd,
-            EM_REPLACESEL,
-            1,
-            wide.as_ptr() as isize,
-        );
-    }
-    true
 }
 
 
@@ -2068,36 +2016,6 @@ pub fn scale_classic_control_metric(hwnd: *mut c_void, logical: i32) -> i32 {
         let dpi = GetDpiForWindow(hwnd as Hwnd).max(96);
         ((logical as i64 * dpi as i64 + 48) / 96)
             .clamp(i32::MIN as i64, i32::MAX as i64) as i32
-    }
-}
-
-pub fn enable_frame_resizing(_hwnd: *mut c_void) {
-    // Windows keeps its established fixed-frame style path unchanged.
-}
-
-pub fn disable_frame_resizing(hwnd: *mut c_void) {
-    if hwnd.is_null() {
-        return;
-    }
-    unsafe {
-        let hwnd = hwnd as Hwnd;
-        let style = GetWindowLongW(hwnd, GWL_STYLE);
-        let fixed = style & !WS_THICKFRAME & !WS_MAXIMIZEBOX;
-        if fixed != style {
-            let _ = SetWindowLongW(hwnd, GWL_STYLE, fixed);
-            // Recalculate non-client metrics so the disabled sizing border and
-            // maximize box disappear immediately without changing client size.
-            let _ = SetWindowPos(
-                hwnd,
-                null_mut(),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
-                    | 0x0001, // SWP_NOSIZE
-            );
-        }
     }
 }
 

@@ -1,7 +1,7 @@
 //! Centralized user-interface translations.
 //!
 //! Keep human-facing strings here instead of scattering literals throughout
-//! the wxDragon front end.  Calculator operator/function labels are deliberately
+//! the platform front ends. Calculator operator/function labels are deliberately
 //! kept language-neutral where Windows Calculator traditionally used compact
 //! mathematical abbreviations.
 
@@ -286,6 +286,54 @@ impl Strings {
         }
     }
 
+    pub const fn graph_export_filter(self) -> &'static str {
+        match self.language {
+            Language::English => "Graph images (*.png, *.jpg, *.jpeg, *.svg)",
+            Language::Portuguese => "Imagens de gráfico (*.png, *.jpg, *.jpeg, *.svg)",
+            Language::Spanish => "Imágenes de gráfico (*.png, *.jpg, *.jpeg, *.svg)",
+        }
+    }
+
+    pub const fn graph_export_local_file_required(self) -> &'static str {
+        match self.language {
+            Language::English => "Select a local file destination.",
+            Language::Portuguese => "Selecione um destino de arquivo local.",
+            Language::Spanish => "Seleccione un destino de archivo local.",
+        }
+    }
+
+    pub const fn graph_export_window_identifier_error(self) -> &'static str {
+        match self.language {
+            Language::English => "The application window could not be identified.",
+            Language::Portuguese => "Não foi possível identificar a janela do aplicativo.",
+            Language::Spanish => "No se pudo identificar la ventana de la aplicación.",
+        }
+    }
+
+    pub const fn graph_export_no_destination(self) -> &'static str {
+        match self.language {
+            Language::English => "The file chooser returned no destination.",
+            Language::Portuguese => "O seletor de arquivos não retornou um destino.",
+            Language::Spanish => "El selector de archivos no devolvió un destino.",
+        }
+    }
+
+    pub const fn save(self) -> &'static str {
+        match self.language {
+            Language::English => "Save",
+            Language::Portuguese => "Salvar",
+            Language::Spanish => "Guardar",
+        }
+    }
+
+    pub const fn cancel(self) -> &'static str {
+        match self.language {
+            Language::English => "Cancel",
+            Language::Portuguese => "Cancelar",
+            Language::Spanish => "Cancelar",
+        }
+    }
+
     pub const fn graph_export_error(self) -> &'static str {
         match self.language {
             Language::English => "Could not export graph",
@@ -336,9 +384,9 @@ impl Strings {
 
     pub const fn about_body(self) -> &'static str {
         match self.language {
-            Language::English => "OpenCalc\n\nWindows 95 Calculator reimplementation in Rust\nNative wxDragon interface; corrected expression parser.",
-            Language::Portuguese => "OpenCalc\n\nReimplementação da Calculadora do Windows 95 em Rust\nInterface nativa wxDragon; analisador de expressões corrigido.",
-            Language::Spanish => "OpenCalc\n\nReimplementación de la Calculadora de Windows 95 en Rust\nInterfaz nativa wxDragon; analizador de expresiones corregido.",
+            Language::English => "OpenCalc\n\nWindows 95 Calculator reimplementation in Rust\nNative wxDragon interface on Windows; native GTK4 interface on Linux; corrected expression parser.",
+            Language::Portuguese => "OpenCalc\n\nReimplementação da Calculadora do Windows 95 em Rust\nInterface nativa wxDragon no Windows; interface nativa GTK4 no Linux; analisador de expressões corrigido.",
+            Language::Spanish => "OpenCalc\n\nReimplementación de la Calculadora de Windows 95 en Rust\nInterfaz nativa wxDragon en Windows; interfaz nativa GTK4 en Linux; analizador de expresiones corregido.",
         }
     }
 
@@ -605,6 +653,10 @@ mod error_localization_tests {
                 strings.graph_infinite_roots(),
                 strings.graph_roots_unreliable(),
                 strings.graph_export_title(),
+                strings.graph_export_filter(),
+                strings.graph_export_local_file_required(),
+                strings.save(),
+                strings.cancel(),
                 strings.graph_export_error(),
                 strings.graph_plot_error(),
             ] {

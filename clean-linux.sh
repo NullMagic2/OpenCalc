@@ -4,15 +4,20 @@ set -euo pipefail
 # ------------------------------------------------------------
 # OpenCalc Linux cleanup script
 #
-# Removes Cargo output and the packaged Linux release directory while
-# leaving all source files, Help files, and companion viewer binaries intact.
+# Removes Cargo and packaged Linux runtime output while preserving the user
+# preference file build-linux/OpenCalc.cfg, matching the Windows clean path.
 # ------------------------------------------------------------
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "Cleaning OpenCalc Linux build output..."
-rm -rf -- "$SCRIPT_DIR/target" "$SCRIPT_DIR/build-linux"
+rm -rf -- "$SCRIPT_DIR/target"
+if [[ -d "$SCRIPT_DIR/build-linux" ]]; then
+    find "$SCRIPT_DIR/build-linux" -mindepth 1 -maxdepth 1 \
+        ! -name 'OpenCalc.cfg' -exec rm -rf -- {} +
+    rmdir "$SCRIPT_DIR/build-linux" 2>/dev/null || true
+fi
 rm -f -- "$SCRIPT_DIR/OpenCalc"
 
 # WSL/Windows downloads can leave NTFS alternate-stream marker files behind

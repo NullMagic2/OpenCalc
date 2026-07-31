@@ -1201,6 +1201,20 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_implicit_products_with_powers_parentheses_and_functions() {
+        for (expression, normalized) in [
+            ("2x**3 + 4", "2*x**3+4"),
+            ("3(x + 1)(x - 1)", "3*(x+1)*(x-1)"),
+            ("2sin(x) + pi x", "2*sin(x)+pi*x"),
+        ] {
+            assert_eq!(normalize_graph_expression(expression).unwrap(), normalized);
+            let mut model = GraphModel::default();
+            model.plot(expression, context()).unwrap();
+            assert!(model.has_plot(), "{expression}");
+        }
+    }
+
+    #[test]
     fn plots_quadratics_with_caret_double_star_or_superscript_notation() {
         for expression in [
             "2x² + 2x + 2",

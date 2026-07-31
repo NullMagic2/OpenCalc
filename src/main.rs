@@ -10,6 +10,7 @@ mod graph;
 mod locale;
 mod platform;
 mod settings;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod tooltip;
 mod ui;
 

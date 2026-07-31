@@ -40,8 +40,8 @@ if exist Help\CALC_ES.HLP echo Included Spanish Help\CALC_ES.HLP
 if exist Help\CALC_ES.CNT echo Included Spanish Help\CALC_ES.CNT
 if exist calc.tooltip echo Included calc.tooltip context-help catalog
 if not exist Help\CALC_EN.HLP echo Note: English Help\CALC_EN.HLP is missing.
-if not exist Help\CALC_PT-BR.HLP echo Note: Portuguese Help\CALC_PT-BR.HLP is missing; OpenCalc will fall back to English.
-if not exist Help\CALC_ES.HLP echo Note: Spanish Help\CALC_ES.HLP is missing; OpenCalc will fall back to English.
+if not exist Help\CALC_PT-BR.HLP echo Note: Portuguese Help\CALC_PT-BR.HLP is missing; Portuguese Help will be unavailable.
+if not exist Help\CALC_ES.HLP echo Note: Spanish Help\CALC_ES.HLP is missing; Spanish Help will be unavailable.
 if not exist Help\CALC_EN.CNT echo Note: Help\CALC_EN.CNT is optional, but required for the English Help contents hierarchy.
 if not exist Help\CALC_PT-BR.CNT echo Note: Help\CALC_PT-BR.CNT is optional, but required for the Portuguese Help contents hierarchy.
 if not exist Help\CALC_ES.CNT echo Note: Help\CALC_ES.CNT is optional, but required for the Spanish Help contents hierarchy.

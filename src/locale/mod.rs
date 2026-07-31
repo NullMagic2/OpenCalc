@@ -11,8 +11,7 @@ mod imp;
 #[path = "linux.rs"]
 mod imp;
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-#[path = "other.rs"]
-mod imp;
+compile_error!("OpenCalc supports only Linux and Windows.");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NumericLocale {

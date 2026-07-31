@@ -83,7 +83,7 @@ impl CompiledExpression {
 }
 
 pub fn eval_expression(input: &str, ctx: EvalContext) -> Result<f64, String> {
-    let toks = Lexer::new(input, ctx.decimal_separator, ctx.thousands_separator).lex()?;
+    let toks = calculator_paste_tokens(input, ctx)?;
     let mut p = Parser { toks: &toks, pos: 0, ctx, x_value: None };
     let value = p.parse_expr(0)?;
     while p.eat(&Tok::Eq) {}
@@ -96,16 +96,51 @@ pub fn eval_expression(input: &str, ctx: EvalContext) -> Result<f64, String> {
     Ok(value)
 }
 
+/// Tokenize text pasted into the numeric Calculator.  A standalone ASCII
+/// `x` is accepted as the familiar multiplication glyph, and when several
+/// binary operators are pasted consecutively the last non-sign operator wins,
+/// matching the Calculator's normal pending-operator replacement behaviour.
+/// Plus and minus are retained because they may be unary signs (`2*-3`).
+fn calculator_paste_tokens(input: &str, ctx: EvalContext) -> Result<Vec<Tok>, String> {
+    let tokens = Lexer::new_calculator(input, ctx.decimal_separator, ctx.thousands_separator).lex()?;
+    let mut normalized = Vec::with_capacity(tokens.len());
+
+    for token in tokens {
+        if matches!(token, Tok::Star | Tok::Slash | Tok::Caret)
+            && normalized.last().is_some_and(is_binary_operator)
+        {
+            *normalized.last_mut().expect("last token checked above") = token;
+        } else {
+            normalized.push(token);
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn is_binary_operator(token: &Tok) -> bool {
+    matches!(token, Tok::Plus | Tok::Minus | Tok::Star | Tok::Slash | Tok::Caret)
+}
+
 struct Lexer<'a> {
     src: &'a str,
     i: usize,
     decimal_separator: char,
     thousands_separator: Option<char>,
+    calculator_paste: bool,
 }
 
 impl<'a> Lexer<'a> {
     fn new(s: &'a str, decimal_separator: char, thousands_separator: Option<char>) -> Self {
-        Self { src: s, i: 0, decimal_separator, thousands_separator }
+        Self { src: s, i: 0, decimal_separator, thousands_separator, calculator_paste: false }
+    }
+
+    fn new_calculator(
+        s: &'a str,
+        decimal_separator: char,
+        thousands_separator: Option<char>,
+    ) -> Self {
+        Self { src: s, i: 0, decimal_separator, thousands_separator, calculator_paste: true }
     }
 
     fn peek(&self) -> Option<char> {
@@ -120,6 +155,12 @@ impl<'a> Lexer<'a> {
 
     fn starts_with_ascii(&self, prefix: &str) -> bool {
         self.src[self.i..].starts_with(prefix)
+    }
+
+    fn ascii_x_is_multiplication(&self) -> bool {
+        !self.src[self.i..]
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("xor"))
     }
 
     fn lex(mut self) -> Result<Vec<Tok>, String> {
@@ -145,6 +186,10 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '\u{00d7}' => { self.bump(); Tok::Star }
+                'x' | 'X' if self.calculator_paste && self.ascii_x_is_multiplication() => {
+                    self.bump();
+                    Tok::Star
+                }
                 '/' | '\u{00f7}' => { self.bump(); Tok::Slash }
                 '^' => { self.bump(); Tok::Caret }
                 '%' => { self.bump(); Tok::Percent }
@@ -617,6 +662,17 @@ mod tests {
 
     #[test] fn precedence_and_parentheses() { assert_eq!(e("(2+2)*4"), 16.0); assert_eq!(e("2+3*4"), 14.0); }
     #[test] fn fixed_unary_minus_cases() { assert_eq!(e("2*-3"), -6.0); assert_eq!(e("2--3"), 5.0); assert_eq!(e("-(2+3)"), -5.0); }
+    #[test]
+    fn pasted_ascii_x_and_replaced_pending_operators_follow_calculator_input_rules() {
+        assert_eq!(e("2x9"), 18.0);
+        assert_eq!(e("2 X 9"), 18.0);
+        assert!((e("2xpi") - 2.0 * std::f64::consts::PI).abs() < 1.0e-12);
+        assert_eq!(e("2x**9 - 7 + 10 + sqrt(144)"), 527.0);
+        assert_eq!(e("2+*3"), 6.0);
+        assert_eq!(e("2/*3"), 6.0);
+        assert_eq!(e("2*-3"), -6.0);
+        assert_eq!(e("2--3"), 5.0);
+    }
     #[test] fn exponent_sign_is_not_confused_with_subtraction() { assert!((e("1e-3") - 0.001).abs() < 1e-15); }
     #[test]
     fn double_star_is_general_right_associative_exponentiation() {
@@ -712,7 +768,8 @@ mod tests {
         let compiled = CompiledExpression::parse("x^2-4", EvalContext::default()).unwrap();
         assert_eq!(compiled.evaluate_at(-2.0).unwrap(), 0.0);
         assert_eq!(compiled.evaluate_at(3.0).unwrap(), 5.0);
-        assert!(eval_expression("x+1", EvalContext::default()).is_err());
+        assert_eq!(eval_expression("x+1", EvalContext::default()).unwrap_err(),
+            "Expected a number, unary sign, function, or '(', got Star.");
     }
 
 }

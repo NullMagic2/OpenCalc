@@ -1,45 +1,73 @@
-//! Linux/glibc numeric-locale backend.
+//! Linux numeric-locale discovery without native FFI.
+
+use std::env;
 
 pub(super) fn numeric_symbols() -> (String, String) {
-    use std::ffi::{c_char, c_int, CStr};
+    let locale = ["LC_ALL", "LC_NUMERIC", "LANG"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|value| !value.trim().is_empty()))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
 
-    // Linux/glibc follows the POSIX locale layout; the first three fields of
-    // `struct lconv` are the non-monetary numeric fields used here.
-    #[repr(C)]
-    struct LConvPrefix {
-        decimal_point: *mut c_char,
-        thousands_sep: *mut c_char,
-        grouping: *mut c_char,
-    }
+    let language = locale
+        .split(['_', '-', '.', '@'])
+        .next()
+        .unwrap_or_default();
 
-    const LC_NUMERIC: c_int = 1;
-
-    unsafe extern "C" {
-        fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
-        fn localeconv() -> *mut LConvPrefix;
-    }
-
-    unsafe fn c_string(ptr: *const c_char) -> String {
-        if ptr.is_null() {
-            return String::new();
-        }
-        CStr::from_ptr(ptr).to_string_lossy().into_owned()
-    }
-
-    unsafe {
-        // Empty locale selects LC_NUMERIC from the user's environment
-        // (LC_ALL/LC_NUMERIC/LANG) instead of remaining in the C locale.
-        let _ = setlocale(LC_NUMERIC, b"\0".as_ptr().cast());
-        let info = localeconv();
-        if info.is_null() {
-            return (".".to_owned(), ",".to_owned());
-        }
-        let decimal = c_string((*info).decimal_point);
-        let thousands = c_string((*info).thousands_sep);
-        (
-            if decimal.is_empty() { ".".to_owned() } else { decimal },
-            thousands,
-        )
+    if uses_decimal_comma(language) {
+        (",".to_owned(), ".".to_owned())
+    } else {
+        (".".to_owned(), ",".to_owned())
     }
 }
 
+fn uses_decimal_comma(language: &str) -> bool {
+    matches!(
+        language,
+        "af"
+            | "be"
+            | "bg"
+            | "ca"
+            | "cs"
+            | "da"
+            | "de"
+            | "el"
+            | "es"
+            | "et"
+            | "eu"
+            | "fi"
+            | "fr"
+            | "hu"
+            | "id"
+            | "is"
+            | "it"
+            | "lt"
+            | "lv"
+            | "mk"
+            | "nl"
+            | "no"
+            | "pl"
+            | "pt"
+            | "ro"
+            | "ru"
+            | "sk"
+            | "sl"
+            | "sq"
+            | "sv"
+            | "tr"
+            | "uk"
+            | "vi"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uses_decimal_comma;
+
+    #[test]
+    fn common_comma_locales_are_detected() {
+        assert!(uses_decimal_comma("pt"));
+        assert!(uses_decimal_comma("de"));
+        assert!(!uses_decimal_comma("en"));
+    }
+}

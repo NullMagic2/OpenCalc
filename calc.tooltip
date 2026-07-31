@@ -194,6 +194,21 @@ When you store a number in memory, an M appears in the box above the memory cont
 [en.paren_indicator]
 The current number of parenthesis levels appears in the box above the ) button. The maximum number of levels is 25.
 
+[en.graph_function]
+Enter the function of x to draw. Press Enter or choose Plot.
+
+[en.graph_plot]
+Draws the function entered in the Function field.
+
+[en.graph_reset]
+Restores the default graph viewport.
+
+[en.graph_export]
+Saves the current graph as a PNG, JPEG, or SVG file.
+
+[en.history_clear]
+Removes every entry from the calculation history.
+
 # --- Português ---
 
 [pt.clear]
@@ -379,6 +394,21 @@ Quando você armazena um número na memória, aparece um M na caixa acima das op
 [pt.paren_indicator]
 O número de níveis atual aparece na caixa acima do botão ")". O número máximo de níveis é de 25.
 
+[pt.graph_function]
+Digite a função de x a ser desenhada. Pressione Enter ou escolha Plotar.
+
+[pt.graph_plot]
+Desenha a função digitada no campo Função.
+
+[pt.graph_reset]
+Restaura a visualização padrão do gráfico.
+
+[pt.graph_export]
+Salva o gráfico atual como arquivo PNG, JPEG ou SVG.
+
+[pt.history_clear]
+Remove todas as entradas do histórico de cálculos.
+
 # --- Español ---
 
 [es.clear]
@@ -563,3 +593,18 @@ Cuando se almacena un número en la memoria, aparece una M en el cuadro situado 
 
 [es.paren_indicator]
 El número actual de niveles de paréntesis aparece en el cuadro situado encima del botón ). El número máximo de niveles es 25.
+[es.graph_function]
+Escriba la función de x que desea dibujar. Pulse Intro o elija Trazar.
+
+[es.graph_plot]
+Dibuja la función escrita en el campo Función.
+
+[es.graph_reset]
+Restaura la vista predeterminada del gráfico.
+
+[es.graph_export]
+Guarda el gráfico actual como archivo PNG, JPEG o SVG.
+
+[es.history_clear]
+Elimina todas las entradas del historial de cálculos.
+
