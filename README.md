@@ -25,6 +25,7 @@ So yes, you can run it on Linux natively too!
 
 <br><br>
 Here is how the Linux version looks like (GTK4 needed):
+<br>
 <img width="1900" height="1334" alt="image" src="https://github.com/user-attachments/assets/43f15d64-b76c-4fba-9dab-562bcf047c1f" />
 
 
