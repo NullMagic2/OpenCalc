@@ -131,9 +131,14 @@ const WM_NCRBUTTONDOWN: Uint = 0x00A4;
 const WM_NCMBUTTONDOWN: Uint = 0x00A7;
 const WM_NCXBUTTONDOWN: Uint = 0x00AB;
 const WM_KEYDOWN: Uint = 0x0100;
+const WM_CHAR: Uint = 0x0102;
 const WM_TIMER: Uint = 0x0113;
 const VK_ESCAPE: usize = 0x1B;
+const WM_SETFOCUS: Uint = 0x0007;
+const WM_KILLFOCUS: Uint = 0x0008;
 const WM_GETFONT: Uint = 0x0031;
+const EM_GETSEL: Uint = 0x00B0;
+const EM_SETSEL: Uint = 0x00B1;
 const EM_POSFROMCHAR: Uint = 0x00D6;
 const EM_CHARFROMPOS: Uint = 0x00D7;
 const EM_LINEINDEX: Uint = 0x00BB;
@@ -180,6 +185,7 @@ const CLASSIC_BUTTON_SUBCLASS_ID: usize = 0xCA1C_9501;
 const CLASSIC_BUTTON_KEY_TIMER_ID: usize = 0xCA1C_9511;
 const CLASSIC_BUTTON_KEY_PRESS_MS: Uint = 85;
 const CLASSIC_FIELD_SUBCLASS_ID: usize = 0xCA1C_9502;
+const SELECT_ALL_SUBCLASS_ID: usize = 0xCA1C_9506;
 const CLASSIC_GROUP_SUBCLASS_ID: usize = 0xCA1C_9505;
 const CLASSIC_SEPARATOR_SUBCLASS_ID: usize = 0xCA1C_9504;
 const CLASSIC_VERTICAL_SEPARATOR_SUBCLASS_ID: usize = 0xCA1C_950A;
@@ -1564,6 +1570,41 @@ pub fn has_keyboard_focus(hwnd: *mut c_void) -> bool {
     !hwnd.is_null() && unsafe { GetFocus() == hwnd as Hwnd }
 }
 
+unsafe extern "system" fn select_all_edit_proc(
+    hwnd: Hwnd,
+    message: Uint,
+    wparam: usize,
+    lparam: isize,
+    _id: usize,
+    _ref_data: usize,
+) -> isize {
+    match message {
+        WM_CHAR if wparam == 1 => {
+            SendMessageW(hwnd, EM_SETSEL, 0, -1);
+            return 0;
+        }
+        WM_NCDESTROY => {
+            RemoveWindowSubclass(hwnd, Some(select_all_edit_proc), SELECT_ALL_SUBCLASS_ID);
+        }
+        _ => {}
+    }
+    DefSubclassProc(hwnd, message, wparam, lparam)
+}
+
+/// Give an ordinary native EDIT control an explicit Ctrl+A Select All command.
+pub fn install_select_all_shortcut(hwnd: *mut c_void) {
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        SetWindowSubclass(
+            hwnd as Hwnd,
+            Some(select_all_edit_proc),
+            SELECT_ALL_SUBCLASS_ID,
+            0,
+        );
+    }
+}
 
 unsafe extern "system" fn classic_display_proc(
     hwnd: Hwnd,
@@ -1574,6 +1615,20 @@ unsafe extern "system" fn classic_display_proc(
     _ref_data: usize,
 ) -> isize {
     match message {
+        WM_CHAR if wparam == 1 => {
+            // A standard Windows EDIT control does not consistently provide
+            // Ctrl+A itself. Handle the generated control character directly
+            // so the focused calculator display selects its complete value.
+            SendMessageW(hwnd, EM_SETSEL, 0, -1);
+            return 0;
+        }
+        WM_PAINT if unsafe { GetFocus() == hwnd } => {
+            // A focused EDIT control must paint itself so Windows can render
+            // the caret and selection exactly once.  The old unconditional
+            // custom painter left its text underneath the native selection,
+            // producing the apparent duplicate label seen after clicking.
+            return DefSubclassProc(hwnd, message, wparam, lparam);
+        }
         WM_PAINT => {
             let mut paint = PaintStruct {
                 hdc: null_mut(),
@@ -1596,6 +1651,13 @@ unsafe extern "system" fn classic_display_proc(
                 draw_classic_display(hwnd, hdc);
                 return 0;
             }
+        }
+        WM_SETFOCUS | WM_KILLFOCUS => {
+            let result = DefSubclassProc(hwnd, message, wparam, lparam);
+            // Switch cleanly between the native selectable edit rendering and
+            // the unfocused Win95-style display rendering.
+            InvalidateRect(hwnd, null_mut(), 1);
+            return result;
         }
         WM_NCDESTROY => {
             RemoveWindowSubclass(hwnd, Some(classic_display_proc), CLASSIC_FIELD_SUBCLASS_ID + 1);
@@ -2259,6 +2321,37 @@ pub fn message(title: &str, body: &str) {
             title.as_ptr(),
             MB_OK | MB_ICONINFORMATION,
         );
+    }
+}
+
+/// Return the currently selected UTF-16 range from a native EDIT control.
+/// Empty selections deliberately return `None`, allowing callers to preserve
+/// the calculator's traditional whole-display Copy command.
+pub fn selected_text(hwnd: *mut c_void) -> Option<String> {
+    if hwnd.is_null() {
+        return None;
+    }
+
+    unsafe {
+        let hwnd = hwnd as Hwnd;
+        let mut start = 0u32;
+        let mut end = 0u32;
+        SendMessageW(
+            hwnd,
+            EM_GETSEL,
+            &mut start as *mut u32 as usize,
+            &mut end as *mut u32 as isize,
+        );
+        if end <= start {
+            return None;
+        }
+
+        let len = GetWindowTextLengthW(hwnd).max(0) as usize;
+        let mut text = vec![0u16; len + 1];
+        let copied = GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32).max(0) as usize;
+        let start = (start as usize).min(copied);
+        let end = (end as usize).min(copied);
+        (end > start).then(|| String::from_utf16_lossy(&text[start..end]))
     }
 }
 

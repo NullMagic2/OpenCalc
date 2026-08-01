@@ -28,8 +28,9 @@ pub use imp::{
     install_classic_splitter_painter, install_classic_sunken_field_painter,
     install_classic_vertical_separator_painter, install_companion_activation_guard,
     install_context_help, install_context_help_dismissal, install_selector_notifier,
-    install_window_state_notifier, is_button_checked, paste_text,
-    position_statistics_companion, pulse_classic_button, scale_classic_control_metric,
+    install_window_state_notifier, install_select_all_shortcut, is_button_checked, paste_text,
+    selected_text, position_statistics_companion, pulse_classic_button,
+    scale_classic_control_metric,
     set_calculator_icon, set_companion_application_active,
     set_window_rect_pixels,
 };

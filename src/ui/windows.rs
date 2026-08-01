@@ -778,7 +778,10 @@ fn make_display(parent: &Panel, x: i32, y: i32, width: i32, font: &Font, initial
     platform::apply_classic_theme(display.get_handle());
     display.set_background_color(WHITE);
     platform::install_classic_display_painter(display.get_handle());
-    display.set_can_focus(false);
+    // The display is a native read-only edit control.  Keep it focusable so
+    // Windows can provide ordinary mouse selection, caret movement and copy
+    // semantics instead of drawing a second synthetic text layer on top.
+    display.set_can_focus(true);
     display
 }
 
@@ -903,6 +906,7 @@ fn build_graph_panel<W: WxWidget>(
     expression.set_font(font);
     platform::apply_classic_theme(expression.get_handle());
     expression.set_background_color(WHITE);
+    platform::install_select_all_shortcut(expression.get_handle());
 
     let plot_button = Button::builder(&panel)
         .with_label(strings.graph_plot())
@@ -1729,6 +1733,8 @@ fn bind_keyboard(ui: &Rc<Ui>) {
         ui.calculator_host.on_char(calculator_char_handler(Rc::clone(ui)));
         ui.standard_panel.on_char(calculator_char_handler(Rc::clone(ui)));
         ui.scientific_panel.on_char(calculator_char_handler(Rc::clone(ui)));
+        ui.standard_display.on_char(display_char_handler(Rc::clone(ui)));
+        ui.scientific_display.on_char(display_char_handler(Rc::clone(ui)));
         ui.inv.on_char(calculator_char_handler(Rc::clone(ui)));
         ui.hyp.on_char(calculator_char_handler(Rc::clone(ui)));
         for radio in &ui.base_radios {
@@ -1781,6 +1787,17 @@ fn handle_calculator_key(ui: &Rc<Ui>, key: CalculatorKeyInput) -> bool {
         } else {
             unicode.map(|ch| ch.to_ascii_lowercase())
         };
+        if matches!(key_char, Some('a'))
+            && [
+                ui.standard_display.get_handle(),
+                ui.scientific_display.get_handle(),
+                ui.graph_panel.expression.get_handle(),
+            ]
+            .into_iter()
+            .any(platform::has_keyboard_focus)
+        {
+            return false;
+        }
         let scientific = ui.calc.borrow().mode == Mode::Scientific;
         return match key_char {
             Some('l') => { perform_from_keyboard(ui, Action::MemC); true }
@@ -1972,13 +1989,70 @@ fn calculator_char_handler(ui: Rc<Ui>) -> impl Fn(WindowEventData) {
     }
 }
 
+/// Preserve native read-only edit behaviour while the display owns focus.
+/// Mouse selection, Ctrl+C/Ctrl+Insert, Ctrl+A and caret navigation must stay
+/// with the TextCtrl; all actual calculator keys continue through the shared
+/// accelerator path so clicking the display does not disable keyboard input.
+fn display_char_handler(ui: Rc<Ui>) -> impl Fn(WindowEventData) {
+    move |event: WindowEventData| {
+        let WindowEventData::Keyboard(key) = &event else {
+            event.skip(true);
+            return;
+        };
+
+        let raw_code = key.get_key_code().unwrap_or(0);
+        let unicode = key
+            .get_unicode_key()
+            .and_then(|code| u32::try_from(code).ok())
+            .and_then(char::from_u32);
+        let control = key.control_down();
+        let command = key.cmd_down();
+        let modified = control || command;
+        let key_char = if (65..=90).contains(&raw_code) || (97..=122).contains(&raw_code) {
+            u32::try_from(raw_code)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|ch| ch.to_ascii_lowercase())
+        } else {
+            unicode.map(|ch| ch.to_ascii_lowercase())
+        };
+
+        // wxKeyCode values: END, HOME, LEFT, UP, RIGHT and DOWN.  Let the
+        // native edit control own these so shift-selection works normally.
+        let native_navigation = matches!(raw_code, 312..=317);
+        let native_selection_command = modified && matches!(key_char, Some('a' | 'c'));
+        let native_copy_insert = control && matches!(raw_code, 322 | 384);
+        if native_navigation || native_selection_command || native_copy_insert {
+            event.skip(true);
+            return;
+        }
+
+        let input = CalculatorKeyInput {
+            raw_code,
+            unicode,
+            control,
+            command,
+            shift: key.shift_down(),
+            alt: key.alt_down(),
+        };
+        event.skip(!handle_calculator_key(&ui, input));
+    }
+}
+
 
 fn perform(ui: &Rc<Ui>, action: Action) {
     match action {
         Action::Copy => {
             let strings = strings_for(ui);
             let raw = ui.calc.borrow().display.clone();
-            let value = strings.runtime_message(&raw).unwrap_or(raw.as_str()).to_string();
+            let display = if ui.calc.borrow().mode == Mode::Standard {
+                &ui.standard_display
+            } else {
+                &ui.scientific_display
+            };
+            let value = platform::selected_text(display.get_handle()).unwrap_or_else(|| {
+                strings.runtime_message(&raw).unwrap_or(raw.as_str()).to_string()
+            });
             if let Err(error) = platform::copy_text(&value) {
                 let localized = strings.runtime_message(&error).unwrap_or(error.as_str());
                 show_modal_message(&ui.frame, strings.calculator_title(), localized);

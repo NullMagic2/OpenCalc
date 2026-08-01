@@ -19,3 +19,26 @@ Buildfix130 Linux HLP-viewer manifest recovery
 - When the root workspace manifest is malformed, build.sh temporarily restores the newest Cargo-valid Cargo.toml from that repository's own history.
 - The original upstream Cargo.toml is restored immediately after the viewer build and also by an EXIT trap after failure or interruption.
 - No hard-coded replacement workspace manifest is maintained in OpenCalc.
+
+Buildfix131 Windows selectable calculator display
+- The Windows calculator display remains one native read-only wxTextCtrl; no overlay label or replacement editor was added.
+- The control is now focusable, allowing ordinary mouse selection, Ctrl+A, Ctrl+C, Ctrl+Insert and caret navigation.
+- While focused, the native EDIT control owns WM_PAINT so the selection and caret are painted exactly once. The custom Win95 display painter resumes only after focus leaves the control.
+- Calculator keys are still routed through the existing shared accelerator path while the display owns focus; native text-selection commands remain with the control.
+- Edit > Copy uses the selected display range when non-empty and preserves the previous whole-display copy behaviour otherwise.
+- Linux source files and behaviour were not changed.
+- Bash syntax, Rust delimiter scanning, platform-separation checks, source-manifest verification and ZIP integrity were validated. Cargo compilation and a live Windows GUI test could not be performed because the Rust/wxWidgets toolchain and Windows runtime are unavailable in this environment.
+
+Buildfix133 minimal Ctrl+A text selection
+- Windows leaves Ctrl+A with the focused calculator display or graph Function text box instead of dispatching the Scientific Statistics Average accelerator.
+- Linux calculator displays are selectable labels; Ctrl+A selects the complete focused display text.
+- Linux graph Function entry continues to use GTK's native Ctrl+A selection.
+- No calculator state, layout, parser, configuration, help, or build behavior was changed.
+- Rust lexical delimiter scanning, platform-separation checks, Bash syntax, source-manifest verification, and ZIP integrity were validated.
+- Cargo compilation and live Windows/Linux GUI tests were unavailable because the Rust and GUI toolchains are not installed in this environment.
+
+Buildfix135 Windows graph Function Ctrl+A
+- The graph Function TextCtrl now installs the same native WM_CHAR Ctrl+A handling used by the calculator display.
+- Ctrl+A sends EM_SETSEL(0, -1) to the focused Function edit control and does not invoke the Scientific Statistics Average accelerator.
+- No Linux, calculator-state, layout, parser, settings, help, or build behavior was changed.
+

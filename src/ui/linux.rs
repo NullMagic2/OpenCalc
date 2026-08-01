@@ -966,7 +966,7 @@ fn make_display(
     label.add_css_class("classic-display");
     label.set_xalign(1.0);
     label.set_yalign(0.5);
-    label.set_selectable(false);
+    label.set_selectable(true);
     frame.set_child(Some(&label));
     fixed_put(panel, &frame, x, y, width, 24);
     label
@@ -1295,6 +1295,12 @@ fn bind_keyboard<W: IsA<gtk::Widget>>(ui: &Rc<Ui>, widget: &W) {
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
     let ui = Rc::clone(ui);
     controller.connect_key_pressed(move |_, key, _, state| {
+        if state.contains(gdk::ModifierType::CONTROL_MASK)
+            && key.to_unicode().is_some_and(|ch| ch.eq_ignore_ascii_case(&'a'))
+            && select_all_focused_display(&ui)
+        {
+            return glib::Propagation::Stop;
+        }
         if graph_entry_has_focus(&ui) {
             return glib::Propagation::Proceed;
         }
@@ -1313,6 +1319,20 @@ fn graph_entry_has_focus(ui: &Ui) -> bool {
     };
     let entry: gtk::Widget = ui.graph_panel.expression.clone().upcast();
     focus == entry || focus.is_ancestor(&entry)
+}
+
+fn select_all_focused_display(ui: &Ui) -> bool {
+    let Some(focus) = gtk::prelude::RootExt::focus(&ui.window) else {
+        return false;
+    };
+    for display in [&ui.standard_display, &ui.scientific_display] {
+        let widget: gtk::Widget = display.clone().upcast();
+        if focus == widget || focus.is_ancestor(&widget) {
+            display.select_region(0, -1);
+            return true;
+        }
+    }
+    false
 }
 
 
