@@ -11,7 +11,8 @@ OpenCalc aims to preserve that experience and improve it.
 
 At the same time, it expands the original calculator with features such as improved expression parsing, calculation history, graph plotting, localization, modern keyboard support, and high-DPI rendering.
 
-<img width="1770" height="852" alt="image" src="https://github.com/user-attachments/assets/2f60e2fa-dd7c-4b03-9bce-fee3a6ea8961" />
+<img width="1762" height="846" alt="image" src="https://github.com/user-attachments/assets/58b56e65-dc7b-4019-a938-f1731bd50e8b" />
+
 
 
 ## Features
@@ -21,7 +22,8 @@ While OpenCalc behaves like the Windows 95 calculator, it contains no legacy cod
 This means that it does not depend on legacy libraries and can run reliably on modern systems, while also providing modern features such as Undo/Redo, calculation history, and a graph manager.
 So yes, you can run it on Linux natively too!
 
-<img width="2594" height="846" alt="image" src="https://github.com/user-attachments/assets/cfe00db3-28c4-47a0-9922-33281d58488d" />
+<img width="2598" height="850" alt="image" src="https://github.com/user-attachments/assets/de1edbf8-f21c-4e9f-b7ad-32ec1de08839" />
+
 
 
 
