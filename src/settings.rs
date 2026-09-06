@@ -15,6 +15,7 @@
 //! history_width=210
 
 use crate::calc::Mode;
+use crate::shortcuts::Shortcuts;
 use crate::i18n::Language;
 use std::fs;
 #[cfg(target_os = "linux")]
@@ -81,6 +82,7 @@ pub struct Settings {
     #[cfg(not(target_os = "linux"))]
     pub history_width: i32,
     pub graph_visible: bool,
+    pub shortcuts: Shortcuts,
     storage_path: PathBuf,
 }
 
@@ -116,6 +118,7 @@ impl Settings {
             #[cfg(not(target_os = "linux"))]
             history_width: DEFAULT_HISTORY_WIDTH,
             graph_visible: false,
+            shortcuts: Shortcuts::default(),
             storage_path,
         }
     }
@@ -176,6 +179,8 @@ impl Settings {
     }
 
     fn apply_text(&mut self, text: &str) {
+        // A malformed hand-edited shortcut section falls back as a whole.
+        self.shortcuts = Shortcuts::from_config(text).unwrap_or_default();
         for raw in text.lines() {
             let line = raw.trim();
             if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
@@ -230,7 +235,7 @@ impl Settings {
             self.decimal_separator.as_cfg(),
             self.history_visible,
             self.graph_visible
-        )
+        ) + &self.shortcuts.to_config()
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -243,7 +248,7 @@ impl Settings {
             self.history_visible,
             self.history_width,
             self.graph_visible
-        )
+        ) + &self.shortcuts.to_config()
     }
 }
 
@@ -408,6 +413,7 @@ mod tests {
             #[cfg(not(target_os = "linux"))]
             history_width: DEFAULT_HISTORY_WIDTH,
             graph_visible: false,
+            shortcuts: Shortcuts::default(),
             storage_path: PathBuf::from("unused.cfg"),
         };
         settings.apply_text(
@@ -433,6 +439,7 @@ mod tests {
             #[cfg(not(target_os = "linux"))]
             history_width: DEFAULT_HISTORY_WIDTH,
             graph_visible: false,
+            shortcuts: Shortcuts::default(),
             storage_path: PathBuf::from("unused.cfg"),
         };
         settings.apply_text("history_width=9999\n");
@@ -451,6 +458,7 @@ mod tests {
             #[cfg(not(target_os = "linux"))]
             history_width: 275,
             graph_visible: true,
+            shortcuts: Shortcuts::default(),
             storage_path: PathBuf::from("unused.cfg"),
         };
         let text = settings.to_text();
@@ -463,6 +471,24 @@ mod tests {
         #[cfg(target_os = "linux")]
         assert!(!text.contains("history_width="));
         assert!(text.contains("graph_visible=true\n"));
+        assert_eq!(text.matches("shortcut.clear=").count(), 1);
+        assert_eq!(Shortcuts::from_config(&text).unwrap(), settings.shortcuts);
+    }
+
+    #[test]
+    fn custom_shortcuts_survive_settings_serialization_and_invalid_input_recovers() {
+        let mut settings = Settings::defaults('.', PathBuf::from("unused.cfg"));
+        settings.apply_text("mode=scientific\nshortcut.clear=Q\nshortcut.equals=\n");
+        let text = settings.to_text();
+        let mut restored = Settings::defaults(',', PathBuf::from("unused.cfg"));
+        restored.apply_text(&text);
+        assert_eq!(restored.shortcuts, settings.shortcuts);
+        assert_eq!(restored.mode, Mode::Scientific);
+        assert!(text.contains("shortcut.clear=Q\n"));
+        assert!(text.contains("shortcut.equals=\n"));
+        restored.apply_text("mode=scientific\nshortcut.clear=Enter\n");
+        assert_eq!(restored.shortcuts, Shortcuts::default());
+        assert_eq!(restored.mode, Mode::Scientific);
     }
 
     #[cfg(target_os = "linux")]

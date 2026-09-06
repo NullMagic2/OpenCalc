@@ -278,6 +278,41 @@ impl Strings {
         }
     }
 
+    pub const fn options_menu(self) -> &'static str {
+        match self.language { Language::English => "&Settings...", Language::Portuguese => "&Configurações...", Language::Spanish => "&Ajustes..." }
+    }
+    pub const fn shortcuts_title(self) -> &'static str {
+        match self.language { Language::English => "Keyboard Shortcuts", Language::Portuguese => "Atalhos de teclado", Language::Spanish => "Atajos de teclado" }
+    }
+    pub const fn press_key_for(self) -> &'static str {
+        match self.language { Language::English => "Press key for", Language::Portuguese => "Pressione uma tecla para", Language::Spanish => "Pulse una tecla para" }
+    }
+    pub const fn shortcut_listening(self) -> &'static str {
+        match self.language { Language::English => "Press a key or Ctrl/Shift combination now...", Language::Portuguese => "Pressione uma tecla ou combinação com Ctrl/Shift...", Language::Spanish => "Pulse una tecla o combinación con Ctrl/Mayús..." }
+    }
+    pub const fn shortcut_recorded(self) -> &'static str {
+        match self.language { Language::English => "Shortcut recorded. Save to apply.", Language::Portuguese => "Atalho registrado. Salve para aplicar.", Language::Spanish => "Atajo registrado. Guarde para aplicar." }
+    }
+    pub const fn shortcut_action(self) -> &'static str {
+        match self.language { Language::English => "Action", Language::Portuguese => "Ação", Language::Spanish => "Acción" }
+    }
+    pub const fn shortcut_keys(self) -> &'static str {
+        match self.language { Language::English => "Shortcuts (separate alternatives with commas)", Language::Portuguese => "Atalhos (separe alternativas com vírgulas)", Language::Spanish => "Atajos (separe alternativas con comas)" }
+    }
+    pub const fn shortcut_default(self) -> &'static str {
+        match self.language { Language::English => "Default", Language::Portuguese => "Padrão", Language::Spanish => "Predeterminado" }
+    }
+    pub const fn restore_defaults(self) -> &'static str {
+        match self.language { Language::English => "Restore Defaults", Language::Portuguese => "Restaurar padrões", Language::Spanish => "Restaurar valores" }
+    }
+    pub const fn shortcut_instructions(self) -> &'static str {
+        match self.language {
+            Language::English => "Examples: C, Escape or Ctrl+Shift+K. Use Plus and Comma for punctuation.\nLeave blank to disable. Defaults: C clears; Shift+C enters hex C.\nText selection and graph editing keep their native shortcuts.",
+            Language::Portuguese => "Exemplos: C, Escape ou Ctrl+Shift+K. Use Plus e Comma para + e vírgula.\nVazio desativa. C limpa; Shift+C insere C hexadecimal.\nSeleção de texto e edição do gráfico mantêm seus atalhos nativos.",
+            Language::Spanish => "Ejemplos: C, Escape o Ctrl+Shift+K. Use Plus y Comma para + y coma.\nVacío desactiva. C borra; Shift+C introduce C hexadecimal.\nLa selección de texto y el gráfico conservan sus atajos nativos.",
+        }
+    }
+
     pub const fn graph_export_title(self) -> &'static str {
         match self.language {
             Language::English => "Export graph",
@@ -286,6 +321,7 @@ impl Strings {
         }
     }
 
+    #[cfg(any(target_os = "linux", test))]
     pub const fn graph_export_filter(self) -> &'static str {
         match self.language {
             Language::English => "Graph images (*.png, *.jpg, *.jpeg, *.svg)",
@@ -294,6 +330,7 @@ impl Strings {
         }
     }
 
+    #[cfg(any(target_os = "linux", test))]
     pub const fn graph_export_local_file_required(self) -> &'static str {
         match self.language {
             Language::English => "Select a local file destination.",
@@ -302,6 +339,7 @@ impl Strings {
         }
     }
 
+    #[cfg(any(target_os = "linux", test))]
     pub const fn graph_export_window_identifier_error(self) -> &'static str {
         match self.language {
             Language::English => "The application window could not be identified.",
@@ -310,6 +348,7 @@ impl Strings {
         }
     }
 
+    #[cfg(any(target_os = "linux", test))]
     pub const fn graph_export_no_destination(self) -> &'static str {
         match self.language {
             Language::English => "The file chooser returned no destination.",
@@ -655,6 +694,8 @@ mod error_localization_tests {
                 strings.graph_export_title(),
                 strings.graph_export_filter(),
                 strings.graph_export_local_file_required(),
+                strings.graph_export_window_identifier_error(),
+                strings.graph_export_no_destination(),
                 strings.save(),
                 strings.cancel(),
                 strings.graph_export_error(),

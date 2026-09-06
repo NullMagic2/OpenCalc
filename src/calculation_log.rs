@@ -95,16 +95,6 @@ impl CalculationLog {
         self.entries.clear();
     }
 
-    /// Record text that is already in invariant `.` notation.
-    pub fn push(
-        &mut self,
-        expression: impl Into<String>,
-        result: impl Into<String>,
-        value: Option<f64>,
-    ) {
-        self.push_localized(expression, result, value, '.');
-    }
-
     /// Record text produced using the currently selected decimal separator.
     /// Numeric marks are normalized once, then localized on every History
     /// refresh.  Error strings are kept verbatim.
@@ -157,8 +147,8 @@ mod tests {
     #[test]
     fn newest_entry_is_rendered_first() {
         let mut log = CalculationLog::with_limit(8);
-        log.push("1 + 1", "2", Some(2.0));
-        log.push("2 * 3", "6", Some(6.0));
+        log.push_localized("1 + 1", "2", Some(2.0), '.');
+        log.push_localized("2 * 3", "6", Some(6.0), '.');
         let expressions: Vec<_> = log.newest_first().map(|entry| entry.expression.as_str()).collect();
         assert_eq!(expressions, ["2 * 3", "1 + 1"]);
     }
@@ -166,9 +156,9 @@ mod tests {
     #[test]
     fn log_is_bounded() {
         let mut log = CalculationLog::with_limit(2);
-        log.push("1", "1", Some(1.0));
-        log.push("2", "2", Some(2.0));
-        log.push("3", "3", Some(3.0));
+        log.push_localized("1", "1", Some(1.0), '.');
+        log.push_localized("2", "2", Some(2.0), '.');
+        log.push_localized("3", "3", Some(3.0), '.');
         assert_eq!(log.len(), 2);
         let expressions: Vec<_> = log.newest_first().map(|entry| entry.expression.as_str()).collect();
         assert_eq!(expressions, ["3", "2"]);
@@ -177,7 +167,7 @@ mod tests {
     #[test]
     fn newest_lookup_keeps_exact_recall_value() {
         let mut log = CalculationLog::default();
-        log.push("1 / 3", "0.3333333333333333", Some(1.0 / 3.0));
+        log.push_localized("1 / 3", "0.3333333333333333", Some(1.0 / 3.0), '.');
         assert_eq!(log.newest(0).and_then(|entry| entry.value), Some(1.0 / 3.0));
         assert!(log.newest(1).is_none());
     }
@@ -185,14 +175,14 @@ mod tests {
     #[test]
     fn error_entry_has_no_recall_value() {
         let mut log = CalculationLog::default();
-        log.push("1 / 0", "Cannot divide by zero.", None);
+        log.push_localized("1 / 0", "Cannot divide by zero.", None, '.');
         assert_eq!(log.newest(0).and_then(|entry| entry.value), None);
     }
 
     #[test]
     fn clear_removes_every_visible_entry() {
         let mut log = CalculationLog::default();
-        log.push("sqrt(9)", "3", Some(3.0));
+        log.push_localized("sqrt(9)", "3", Some(3.0), '.');
         log.clear();
         assert!(log.is_empty());
     }

@@ -6,6 +6,7 @@
 //! matching the reference.  This module keeps the recovered Calculator child
 //! control coordinates but lets wxWidgets own the frame, menu bar and controls.
 
+use crate::shortcuts::{Action, Command, Shortcuts, DEFINITIONS};
 use crate::calc::{Base, BinaryOp, Calculator, Mode};
 use crate::calculation_log::CalculationLog;
 use crate::expr::AngleMode;
@@ -143,6 +144,7 @@ const SCI_CHECK_W: i32 = 48;
 const SCI_KEYPAD_Y: i32 = 133;
 const SCI_KEYPAD_STEP: i32 = 34;
 
+const ID_SHORTCUTS: i32 = 6060;
 const ID_COPY: i32 = 6001;
 const ID_PASTE: i32 = 6002;
 const ID_UNDO: i32 = 6003;
@@ -159,37 +161,6 @@ const ID_SEPARATOR_COMMA: i32 = 6041;
 const ID_HISTORY_PANEL: i32 = 6050;
 const ID_GRAPH_PANEL: i32 = 6051;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Action {
-    Digit(char),
-    Dot,
-    Back,
-    CE,
-    C,
-    Sign,
-    Eq,
-    Percent,
-    Bin(BinaryOp),
-    KeyboardStar,
-    Unary(&'static str),
-    MemC,
-    MemR,
-    MemS,
-    MemAdd,
-    Pi,
-    Open,
-    Close,
-    StatsOpen,
-    StatsDat,
-    StatsAvg,
-    StatsSum,
-    StatsDev,
-    ToggleFE,
-    Copy,
-    Paste,
-    About,
-    Help,
-}
 
 #[derive(Clone, Copy)]
 enum Tone {
@@ -563,6 +534,7 @@ pub fn run() -> Result<(), String> {
         bind_scientific_selectors(&ui);
         bind_menu(&ui);
         bind_keyboard(&ui);
+        bind_client_focus_recovery(&ui);
         bind_splitter(&ui);
         bind_graph(&ui);
         bind_companion_tracking(&ui);
@@ -577,7 +549,6 @@ pub fn run() -> Result<(), String> {
         if !platform::center_window_on_work_area(ui.frame.get_handle()) {
             ui.frame.centre();
         }
-        // Preserve the original frame-level accelerator focus on Windows.
         ui.frame.set_focus();
     })
     .map_err(|error| format!("wxDragon failed to start: {error:?}"))?;
@@ -595,17 +566,17 @@ fn install_menu_bar(
 ) -> MenuHandles {
     let edit_menu = Menu::builder().build();
     let undo_item = edit_menu
-        .append(ID_UNDO, strings.undo(), strings.undo_help(), ItemKind::Normal)
+        .append(ID_UNDO, strings.undo().split('\t').next().unwrap(), strings.undo_help(), ItemKind::Normal)
         .expect("Undo menu item");
     let redo_item = edit_menu
-        .append(ID_REDO, strings.redo(), strings.redo_help(), ItemKind::Normal)
+        .append(ID_REDO, strings.redo().split('\t').next().unwrap(), strings.redo_help(), ItemKind::Normal)
         .expect("Redo menu item");
     edit_menu.append_separator();
     edit_menu
-        .append(ID_COPY, strings.copy(), strings.copy_help(), ItemKind::Normal)
+        .append(ID_COPY, strings.copy().split('\t').next().unwrap(), strings.copy_help(), ItemKind::Normal)
         .expect("Copy menu item");
     edit_menu
-        .append(ID_PASTE, strings.paste(), strings.paste_help(), ItemKind::Normal)
+        .append(ID_PASTE, strings.paste().split('\t').next().unwrap(), strings.paste_help(), ItemKind::Normal)
         .expect("Paste menu item");
 
     // No history exists at startup, so both commands begin disabled.
@@ -653,8 +624,11 @@ fn install_menu_bar(
         .append_submenu(language_menu, strings.language_menu(), strings.language_help())
         .expect("Language submenu");
 
+    let options_menu = Menu::builder()
+        .append_item(ID_SHORTCUTS, strings.shortcuts_title(), strings.shortcuts_title())
+        .build();
     let help_menu = Menu::builder()
-        .append_item(ID_HELP_TOPICS, strings.help_topics(), strings.help_topics_help())
+        .append_item(ID_HELP_TOPICS, strings.help_topics().split('\t').next().unwrap(), strings.help_topics_help())
         .append_separator()
         .append_item(ID_ABOUT, strings.about_opencalc(), strings.about_title())
         .build();
@@ -662,6 +636,7 @@ fn install_menu_bar(
     let menu_bar = MenuBar::builder()
         .append(edit_menu, strings.edit_menu())
         .append(view_menu, strings.view_menu())
+        .append(options_menu, strings.options_menu())
         .append(help_menu, strings.help_menu())
         .build();
     frame.set_menu_bar(menu_bar);
@@ -1194,6 +1169,7 @@ fn bind_menu(ui: &Rc<Ui>) {
         // dismiss a tracking context-help popup before performing any command.
         platform::dismiss_context_tooltip();
         match event.get_id() {
+            ID_SHORTCUTS => show_shortcuts(&ui_c),
             ID_UNDO => undo(&ui_c),
             ID_REDO => redo(&ui_c),
             ID_COPY => perform(&ui_c, Action::Copy),
@@ -1218,6 +1194,140 @@ fn bind_menu(ui: &Rc<Ui>) {
             _ => {}
         }
     });
+}
+
+fn shortcut_record_handler(entry: TextCtrl, status: StaticText, recording: Rc<Cell<bool>>, key_down: bool, strings: Strings) -> impl Fn(WindowEventData) {
+    move |event| {
+        if !recording.get() { event.skip(true); return; }
+        let WindowEventData::Keyboard(key) = &event else { event.skip(true); return; };
+        let raw = key.get_key_code().unwrap_or(0);
+        let control = key.control_down();
+        if key.alt_down() {
+            status.set_label("Alt shortcuts are reserved for menu navigation.");
+            event.skip(false);
+            return;
+        }
+        if key_down && !control && raw > 32 && raw < 300 && raw != 127 {
+            event.skip(true);
+            return;
+        }
+        let unicode = key.get_unicode_key().and_then(|code| char::from_u32(code as u32));
+        if let Some(chord) = crate::shortcuts::windows_key(raw, unicode, control, key.shift_down()) {
+            entry.set_value(&chord.label());
+            recording.set(false);
+            status.set_label(strings.shortcut_recorded());
+        }
+        event.skip(false);
+    }
+}
+
+fn show_shortcuts(ui: &Rc<Ui>) {
+    use wxdragon::dialogs::Dialog;
+    use wxdragon::id::ID_CANCEL;
+    let strings = strings_for(ui);
+    let dialog = Dialog::builder(&ui.frame, strings.shortcuts_title()).build();
+    dialog.set_font(&classic_font(FontWeight::Normal));
+    dialog.set_escape_id(wxdragon::id::ID_NONE);
+    dialog.set_affirmative_id(wxdragon::id::ID_NONE);
+    let layout = BoxSizer::builder(Orientation::Vertical).build();
+    let label = |text: &str| StaticText::builder(&dialog).with_label(text).build();
+    let action_label = label(strings.shortcut_action());
+    let choice = Choice::builder(&dialog).build();
+    for def in DEFINITIONS { choice.append(def.label); }
+    choice.set_selection(0);
+    let keys_label = label(strings.shortcut_keys());
+    let draft = Rc::new(RefCell::new(ui.settings.borrow().shortcuts.texts()));
+    let selected = Rc::new(Cell::new(0usize));
+    let entry = TextCtrl::builder(&dialog).with_value(&draft.borrow()[0]).build();
+    entry.set_min_size(Size::new(dp(480), -1));
+    let capture = Button::builder(&dialog).with_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[0].label)).build();
+    let recording = Rc::new(Cell::new(false));
+    let status = label(" ");
+    let default_label = label(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[0].defaults));
+    let instructions = label(strings.shortcut_instructions());
+    let row = BoxSizer::builder(Orientation::Horizontal).build();
+    let reset = Button::builder(&dialog).with_label(strings.restore_defaults()).build();
+    let save = Button::builder(&dialog).with_label(strings.save()).build();
+    let cancel = Button::builder(&dialog).with_label(strings.cancel()).build();
+    let flags = SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Bottom;
+    layout.add_spacer(dp(12));
+    layout.add(&action_label, 0, flags, dp(12));
+    layout.add(&choice, 0, flags, dp(12));
+    layout.add(&capture, 0, flags, dp(12));
+    layout.add(&status, 0, flags, dp(12));
+    layout.add(&keys_label, 0, flags, dp(12));
+    layout.add(&entry, 0, flags, dp(12));
+    layout.add(&default_label, 0, flags, dp(12));
+    layout.add(&instructions, 0, flags, dp(12));
+    row.add(&reset, 0, SizerFlag::Right, dp(12));
+    row.add_stretch_spacer(1);
+    row.add(&save, 0, SizerFlag::Right, dp(12));
+    row.add(&cancel, 0, SizerFlag::AlignLeft, 0);
+    layout.add_sizer(&row, 0, flags, dp(12));
+    dialog.set_sizer_and_fit(layout, true);
+    dialog.on_key_down(shortcut_record_handler(entry, status, Rc::clone(&recording), true, strings));
+    dialog.on_char(shortcut_record_handler(entry, status, Rc::clone(&recording), false, strings));
+    capture.on_key_down(shortcut_record_handler(entry, status, Rc::clone(&recording), true, strings));
+    capture.on_char(shortcut_record_handler(entry, status, Rc::clone(&recording), false, strings));
+    {
+        let recording = Rc::clone(&recording);
+        capture.on_click(move |_| {
+            recording.set(true);
+            status.set_label(strings.shortcut_listening());
+            capture.set_focus();
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let selected = Rc::clone(&selected);
+        entry.on_text_updated(move |_| { draft.borrow_mut()[selected.get()] = entry.get_value(); });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let selected = Rc::clone(&selected);
+        choice.on_selection_changed(move |_| {
+            let index = choice.get_selection().unwrap_or(0) as usize;
+            selected.set(index);
+            capture.set_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[index].label));
+            dialog.layout();
+            let value = draft.borrow()[index].clone();
+            entry.set_value(&value);
+            default_label.set_label(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[index].defaults));
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let selected = Rc::clone(&selected);
+        reset.on_click(move |_| {
+            *draft.borrow_mut() = Shortcuts::default().texts();
+            let value = draft.borrow()[selected.get()].clone();
+            entry.set_value(&value);
+        });
+    }
+    {
+        let ui = Rc::clone(ui);
+        save.on_click(move |_| {
+            let shortcuts = match Shortcuts::from_texts(&draft.borrow()) {
+                Ok(shortcuts) => shortcuts,
+                Err(error) => { platform::message(strings.shortcuts_title(), &error); return; }
+            };
+            let mut settings = ui.settings.borrow_mut();
+            let previous = std::mem::replace(&mut settings.shortcuts, shortcuts);
+            if let Err(error) = settings.save() {
+                settings.shortcuts = previous;
+                drop(settings);
+                platform::message(strings.shortcuts_title(), &error.to_string());
+                return;
+            }
+            dialog.end_modal(ID_OK);
+        });
+    }
+    cancel.on_click(move |_| dialog.end_modal(ID_CANCEL));
+    dialog.centre();
+    entry.set_focus();
+    dialog.show_modal();
+    dialog.destroy();
+    ui.frame.set_focus();
 }
 
 fn strings_for(ui: &Ui) -> Strings {
@@ -1548,21 +1658,23 @@ fn apply_language(ui: &Ui) {
     if let Some(menu_bar) = ui.frame.get_menu_bar() {
         menu_bar.set_menu_label(0, strings.edit_menu());
         menu_bar.set_menu_label(1, strings.view_menu());
-        menu_bar.set_menu_label(2, strings.help_menu());
+        menu_bar.set_menu_label(2, strings.options_menu());
+        menu_bar.set_menu_label(3, strings.help_menu());
 
         for (id, label) in [
-            (ID_UNDO, strings.undo()),
-            (ID_REDO, strings.redo()),
-            (ID_COPY, strings.copy()),
-            (ID_PASTE, strings.paste()),
+            (ID_UNDO, strings.undo().split('\t').next().unwrap()),
+            (ID_REDO, strings.redo().split('\t').next().unwrap()),
+            (ID_COPY, strings.copy().split('\t').next().unwrap()),
+            (ID_PASTE, strings.paste().split('\t').next().unwrap()),
             (ID_SCIENTIFIC, strings.scientific()),
             (ID_STANDARD, strings.standard()),
             (ID_GRAPH_PANEL, strings.graph()),
             (ID_HISTORY_PANEL, strings.history()),
             (ID_SEPARATOR_PERIOD, strings.period_separator()),
             (ID_SEPARATOR_COMMA, strings.comma_separator()),
-            (ID_HELP_TOPICS, strings.help_topics()),
+            (ID_HELP_TOPICS, strings.help_topics().split('\t').next().unwrap()),
             (ID_ABOUT, strings.about_opencalc()),
+            (ID_SHORTCUTS, strings.shortcuts_title()),
         ] {
             if let Some(item) = menu_bar.find_item(id) {
                 item.set_label(label);
@@ -1600,7 +1712,7 @@ fn apply_language(ui: &Ui) {
             language_menu.set_help_string(ID_LANGUAGE_PORTUGUESE, strings.language_help());
             language_menu.set_help_string(ID_LANGUAGE_SPANISH, strings.language_help());
         }
-        if let Some(help_menu) = menu_bar.get_menu(2) {
+        if let Some(help_menu) = menu_bar.get_menu(3) {
             help_menu.set_help_string(ID_HELP_TOPICS, strings.help_topics_help());
             help_menu.set_help_string(ID_ABOUT, strings.about_title());
         }
@@ -1726,317 +1838,103 @@ fn perform_from_keyboard(ui: &Rc<Ui>, action: Action) {
     perform(ui, action);
 }
 
-fn bind_keyboard(ui: &Rc<Ui>) {
+fn bind_client_focus_recovery(ui: &Rc<Ui>) {
+    // A native menu can retain the keyboard focus after it is dismissed.
+    // Clicking an otherwise empty calculator surface should return keyboard
+    // input to the frame, just like clicking a calculator key already does.
+    // Bind only the client/background panels: child edit controls keep their
+    // own mouse/focus behavior for display selection and graph editing.
+    for surface in [&ui.root_surface, &ui.calculator_host, &ui.standard_panel, &ui.scientific_panel] {
+        let ui_c = Rc::clone(ui);
+        surface.on_mouse_left_down(move |event| {
+            ui_c.frame.set_focus();
+            event.skip(true);
+        });
+    }
+}
 
-    {
-        ui.frame.on_char(calculator_char_handler(Rc::clone(ui)));
-        ui.calculator_host.on_char(calculator_char_handler(Rc::clone(ui)));
-        ui.standard_panel.on_char(calculator_char_handler(Rc::clone(ui)));
-        ui.scientific_panel.on_char(calculator_char_handler(Rc::clone(ui)));
-        ui.standard_display.on_char(display_char_handler(Rc::clone(ui)));
-        ui.scientific_display.on_char(display_char_handler(Rc::clone(ui)));
-        ui.inv.on_char(calculator_char_handler(Rc::clone(ui)));
-        ui.hyp.on_char(calculator_char_handler(Rc::clone(ui)));
-        for radio in &ui.base_radios {
-            radio.on_char(calculator_char_handler(Rc::clone(ui)));
-        }
-        for radio in &ui.angle_radios {
-            radio.on_char(calculator_char_handler(Rc::clone(ui)));
-        }
+fn bind_keyboard(ui: &Rc<Ui>) {
+    // Native startup/tab navigation can focus a button even when its tab stop
+    // is disabled. CHAR does not bubble, so bind the buttons themselves.
+    for (button, _) in &ui.action_buttons {
+        bind_keyboard_widget(ui, button, false);
+    }
+    bind_keyboard_widget(ui, &ui.frame, false);
+    bind_keyboard_widget(ui, &ui.root_surface, false);
+    bind_keyboard_widget(ui, &ui.splitter, false);
+    bind_keyboard_widget(ui, &ui.calculator_host, false);
+    bind_keyboard_widget(ui, &ui.standard_panel, false);
+    bind_keyboard_widget(ui, &ui.scientific_panel, false);
+    bind_keyboard_widget(ui, &ui.history_panel.panel, false);
+    bind_keyboard_widget(ui, &ui.standard_display, true);
+    bind_keyboard_widget(ui, &ui.scientific_display, true);
+    bind_keyboard_widget(ui, &ui.inv, false);
+    bind_keyboard_widget(ui, &ui.hyp, false);
+    for radio in ui.base_radios.iter().chain(ui.angle_radios.iter()) {
+        bind_keyboard_widget(ui, radio, false);
     }
 }
 
 fn bind_statistics_keyboard(ui: &Rc<Ui>, frame: &Frame, panel: &Panel, list: &ListBox) {
-
-    {
-        frame.on_char(calculator_char_handler(Rc::clone(ui)));
-        panel.on_char(calculator_char_handler(Rc::clone(ui)));
-        list.on_char(calculator_char_handler(Rc::clone(ui)));
-    }
+    bind_keyboard_widget(ui, frame, false);
+    bind_keyboard_widget(ui, panel, false);
+    bind_keyboard_widget(ui, list, false);
 }
 
-#[derive(Clone, Copy)]
-struct CalculatorKeyInput {
-    raw_code: i32,
-    unicode: Option<char>,
-    control: bool,
-    command: bool,
-    shift: bool,
-    alt: bool,
+fn bind_keyboard_widget<W: WindowEvents>(ui: &Rc<Ui>, widget: &W, display: bool) {
+    widget.on_key_down(keyboard_handler(Rc::clone(ui), display, true));
+    widget.on_char(keyboard_handler(Rc::clone(ui), display, false));
 }
 
-fn handle_calculator_key(ui: &Rc<Ui>, key: CalculatorKeyInput) -> bool {
-    let unicode = key.unicode;
-    let raw_code = key.raw_code;
-
-    // Alt belongs to menu navigation and must never accidentally become a
-    // Calculator accelerator when combined with another modifier.
-    if key.alt {
-        return false;
-    }
-
-    // The Win95 SA accelerator table uses Ctrl+L/R/M/P for memory and
-    // Ctrl+S/A/T/D for Statistics. Keep modern Edit accelerators owned by
-    // wxWidgets so Ctrl+C/V/Z/Y continue through the menu commands.
-    if key.control || key.command {
-        let key_char = if (65..=90).contains(&raw_code) || (97..=122).contains(&raw_code) {
-            u32::try_from(raw_code)
-                .ok()
-                .and_then(char::from_u32)
-                .map(|ch| ch.to_ascii_lowercase())
-        } else {
-            unicode.map(|ch| ch.to_ascii_lowercase())
+fn keyboard_handler(ui: Rc<Ui>, display: bool, key_down: bool) -> impl Fn(WindowEventData) {
+    move |event| {
+        let WindowEventData::Keyboard(key) = &event else { event.skip(true); return; };
+        let raw = key.get_key_code().unwrap_or(0);
+        let control = key.control_down() || key.cmd_down();
+        // Printable keys need CHAR's keyboard-layout translation. Handle control
+        // chords and navigation on KEY_DOWN before native controls consume them.
+        if key.alt_down() || (key_down && !control && raw > 32 && raw < 300 && raw != 127) {
+            event.skip(true);
+            return;
+        }
+        let unicode = key.get_unicode_key().and_then(|code| char::from_u32(code as u32));
+        let Some(chord) = crate::shortcuts::windows_key(raw, unicode, control, key.shift_down()) else {
+            event.skip(true); return;
         };
-        if matches!(key_char, Some('a'))
-            && [
-                ui.standard_display.get_handle(),
-                ui.scientific_display.get_handle(),
-                ui.graph_panel.expression.get_handle(),
-            ]
-            .into_iter()
-            .any(platform::has_keyboard_focus)
-        {
-            return false;
+        if platform::has_keyboard_focus(ui.graph_panel.expression.get_handle())
+            || (display && chord.native_display_key()) {
+            event.skip(true);
+            return;
         }
         let scientific = ui.calc.borrow().mode == Mode::Scientific;
-        return match key_char {
-            Some('l') => { perform_from_keyboard(ui, Action::MemC); true }
-            Some('r') => { perform_from_keyboard(ui, Action::MemR); true }
-            Some('m') => { perform_from_keyboard(ui, Action::MemS); true }
-            Some('p') => { perform_from_keyboard(ui, Action::MemAdd); true }
-            Some('s') if scientific => { perform_from_keyboard(ui, Action::StatsOpen); true }
-            Some('a') if scientific => { perform_from_keyboard(ui, Action::StatsAvg); true }
-            Some('t') if scientific => { perform_from_keyboard(ui, Action::StatsSum); true }
-            Some('d') if scientific => { perform_from_keyboard(ui, Action::StatsDev); true }
-            _ if matches!(raw_code, 322 | 384) => { perform_from_keyboard(ui, Action::Copy); true }
-            _ => false,
-        };
+        let command = ui.settings.borrow().shortcuts.resolve(&chord, scientific);
+        event.skip(!command.is_some_and(|command| perform_shortcut(&ui, command)));
     }
+}
 
-    // Shift+Insert is the other clipboard accelerator present in SA.
-    if key.shift && matches!(raw_code, 322 | 384) {
-        perform_from_keyboard(ui, Action::Paste);
-        return true;
-    }
-
-    // Non-character keys and keypad aliases. Values are the stable wxWidgets
-    // wxKeyCode numbers used by wxDragon on Windows.
-    let handled_raw = match raw_code {
-        8 | 314 | 376 => { perform_from_keyboard(ui, Action::Back); true },
-        27 => { perform_from_keyboard(ui, Action::C); true },
-        127 | 385 => { perform_from_keyboard(ui, Action::CE); true },
-        13 | 370 | 386 => { perform_from_keyboard(ui, Action::Eq); true },
-        322 | 384 if ui.calc.borrow().mode == Mode::Scientific => {
-            perform_from_keyboard(ui, Action::StatsDat);
-            true
-        },
-        324..=333 => {
-            let digit = char::from(b'0' + (raw_code - 324) as u8);
-            perform_from_keyboard(ui, Action::Digit(digit));
-            true
-        }
-        334 | 387 => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Mul)); true },
-        335 | 388 => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Add)); true },
-        336 | 338 | 389 | 391 => { perform_from_keyboard(ui, Action::Dot); true },
-        337 | 390 => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Sub)); true },
-        339 | 392 => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Div)); true },
-        // F1 remains the Help menu accelerator.
-        341 if ui.calc.borrow().mode == Mode::Scientific => {
-            if ui.calc.borrow().base == Base::Dec {
-                select_angle(ui, 0, AngleMode::Degrees);
-                true
-            } else {
-                false
-            }
-        }
-        // The original F3 selects Word in non-decimal modes. OpenCalc does
-        // not expose the Win95 Dword/Word/Byte width selector.
-        342 => false,
-        343 if ui.calc.borrow().mode == Mode::Scientific => {
-            if ui.calc.borrow().base == Base::Dec {
-                select_angle(ui, 2, AngleMode::Grads);
-                true
-            } else {
-                false
-            }
-        }
-        344 if ui.calc.borrow().mode == Mode::Scientific => {
-            select_base(ui, 0, Base::Hex);
-            true
-        },
-        345 if ui.calc.borrow().mode == Mode::Scientific => {
-            if ui.calc.borrow().base == Base::Dec {
-                select_angle(ui, 1, AngleMode::Radians);
-            } else {
-                select_base(ui, 1, Base::Dec);
-            }
-            true
-        }
-        346 if ui.calc.borrow().mode == Mode::Scientific => {
-            select_base(ui, 2, Base::Oct);
-            true
-        },
-        347 if ui.calc.borrow().mode == Mode::Scientific => {
-            select_base(ui, 3, Base::Bin);
-            true
-        },
-        348 => { perform_from_keyboard(ui, Action::Sign); true },
-        _ => false,
-    };
-    if handled_raw {
-        return true;
-    }
-
-    let Some(ch) = unicode.or_else(|| {
-        u32::try_from(raw_code)
-            .ok()
-            .and_then(char::from_u32)
-    }) else {
-        return false;
-    };
-
-    let lower = ch.to_ascii_lowercase();
+fn perform_shortcut(ui: &Rc<Ui>, command: Command) -> bool {
     let mode = ui.calc.borrow().mode;
-    match ch {
-        // Both punctuation spellings are accepted regardless of the active
-        // locale, matching the recovered clipboard/keyboard behaviour.
-        '.' | ',' => { perform_from_keyboard(ui, Action::Dot); true },
-        '0'..='9' => { perform_from_keyboard(ui, Action::Digit(ch)); true },
-        'a'..='f' | 'A'..='F' => { perform_from_keyboard(ui, Action::Digit(ch)); true },
-        '+' => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Add)); true },
-        '-' | '−' => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Sub)); true },
-        '*' => { perform_from_keyboard(ui, Action::KeyboardStar); true },
-        '×' => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Mul)); true },
-        '/' | '÷' => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Div)); true },
-        '%' => {
-            if mode == Mode::Scientific {
-                perform_from_keyboard(ui, Action::Bin(BinaryOp::Mod));
-            } else {
-                perform_from_keyboard(ui, Action::Percent);
-            }
-            true
+    match command {
+        Command::Button(action) => perform_from_keyboard(ui, action),
+        Command::Percent => perform_from_keyboard(ui, if mode == Mode::Scientific { Action::Bin(BinaryOp::Mod) } else { Action::Percent }),
+        Command::Square => perform_from_keyboard(ui, Action::Unary(if mode == Mode::Scientific { "square" } else { "sqrt" })),
+        Command::Undo => undo(ui),
+        Command::Redo => redo(ui),
+        Command::Inv | Command::Hyp => {
+            mutate_calculator(ui, |calc| if command == Command::Inv { calc.inv = !calc.inv; } else { calc.hyp = !calc.hyp; });
+            refresh(ui);
         }
-        '(' => { perform_from_keyboard(ui, Action::Open); true },
-        ')' => { perform_from_keyboard(ui, Action::Close); true },
-        '=' | '\r' | '\n' => { perform_from_keyboard(ui, Action::Eq); true },
-        '\u{8}' => { perform_from_keyboard(ui, Action::Back); true },
-        '\u{1b}' => { perform_from_keyboard(ui, Action::C); true },
-        '@' => {
-            if mode == Mode::Scientific {
-                perform_from_keyboard(ui, Action::Unary("square"));
-            } else {
-                perform_from_keyboard(ui, Action::Unary("sqrt"));
-            }
-            true
+        Command::Base(base) => select_base(ui, match base { Base::Hex => 0, Base::Dec => 1, Base::Oct => 2, Base::Bin => 3 }, base),
+        Command::Angle(angle) => {
+            if ui.calc.borrow().base != Base::Dec { return false; }
+            select_angle(ui, match angle { AngleMode::Degrees => 0, AngleMode::Radians => 1, AngleMode::Grads => 2 }, angle);
         }
-        '!' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("factorial")); true },
-        '#' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("cube")); true },
-        '&' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Bin(BinaryOp::And)); true },
-        '|' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Or)); true },
-        '^' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Xor)); true },
-        '<' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Lsh)); true },
-        '~' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("not")); true },
-        ';' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("int")); true },
-        _ => match lower {
-            'r' => { perform_from_keyboard(ui, Action::Unary("recip")); true },
-            's' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("sin")); true },
-            'o' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("cos")); true },
-            't' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("tan")); true },
-            'n' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("ln")); true },
-            'l' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("log")); true },
-            'm' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("dms")); true },
-            'x' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Unary("exp")); true },
-            'y' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Bin(BinaryOp::Pow)); true },
-            'p' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::Pi); true },
-            'i' if mode == Mode::Scientific => {
-                let checked = !ui.calc.borrow().inv;
-                ui.inv.set_value(checked);
-                mutate_calculator(ui, |calc| calc.inv = checked);
-                refresh(ui);
-                true
-            }
-            'h' if mode == Mode::Scientific => {
-                let checked = !ui.calc.borrow().hyp;
-                ui.hyp.set_value(checked);
-                mutate_calculator(ui, |calc| calc.hyp = checked);
-                refresh(ui);
-                true
-            }
-            'v' if mode == Mode::Scientific => { perform_from_keyboard(ui, Action::ToggleFE); true },
-            _ => false,
-        },
-    }
-}
-
-fn calculator_char_handler(ui: Rc<Ui>) -> impl Fn(WindowEventData) {
-    move |event: WindowEventData| {
-        let WindowEventData::Keyboard(key) = &event else {
-            event.skip(true);
-            return;
-        };
-        let input = CalculatorKeyInput {
-            raw_code: key.get_key_code().unwrap_or(0),
-            unicode: key
-                .get_unicode_key()
-                .and_then(|code| u32::try_from(code).ok())
-                .and_then(char::from_u32),
-            control: key.control_down(),
-            command: key.cmd_down(),
-            shift: key.shift_down(),
-            alt: key.alt_down(),
-        };
-        event.skip(!handle_calculator_key(&ui, input));
-    }
-}
-
-/// Preserve native read-only edit behaviour while the display owns focus.
-/// Mouse selection, Ctrl+C/Ctrl+Insert, Ctrl+A and caret navigation must stay
-/// with the TextCtrl; all actual calculator keys continue through the shared
-/// accelerator path so clicking the display does not disable keyboard input.
-fn display_char_handler(ui: Rc<Ui>) -> impl Fn(WindowEventData) {
-    move |event: WindowEventData| {
-        let WindowEventData::Keyboard(key) = &event else {
-            event.skip(true);
-            return;
-        };
-
-        let raw_code = key.get_key_code().unwrap_or(0);
-        let unicode = key
-            .get_unicode_key()
-            .and_then(|code| u32::try_from(code).ok())
-            .and_then(char::from_u32);
-        let control = key.control_down();
-        let command = key.cmd_down();
-        let modified = control || command;
-        let key_char = if (65..=90).contains(&raw_code) || (97..=122).contains(&raw_code) {
-            u32::try_from(raw_code)
-                .ok()
-                .and_then(char::from_u32)
-                .map(|ch| ch.to_ascii_lowercase())
-        } else {
-            unicode.map(|ch| ch.to_ascii_lowercase())
-        };
-
-        // wxKeyCode values: END, HOME, LEFT, UP, RIGHT and DOWN.  Let the
-        // native edit control own these so shift-selection works normally.
-        let native_navigation = matches!(raw_code, 312..=317);
-        let native_selection_command = modified && matches!(key_char, Some('a' | 'c'));
-        let native_copy_insert = control && matches!(raw_code, 322 | 384);
-        if native_navigation || native_selection_command || native_copy_insert {
-            event.skip(true);
-            return;
+        Command::F6 => {
+            if ui.calc.borrow().base == Base::Dec { select_angle(ui, 1, AngleMode::Radians); }
+            else { select_base(ui, 1, Base::Dec); }
         }
-
-        let input = CalculatorKeyInput {
-            raw_code,
-            unicode,
-            control,
-            command,
-            shift: key.shift_down(),
-            alt: key.alt_down(),
-        };
-        event.skip(!handle_calculator_key(&ui, input));
     }
+    true
 }
 
 
@@ -2694,11 +2592,6 @@ fn bind_companion_tracking(ui: &Rc<Ui>) {
                 // This updates Statistics' active appearance/z-order without
                 // moving it or stealing real keyboard focus.
                 set_statistics_application_active(&ui_c, activation.is_active());
-                if activation.is_active()
-                    && !platform::has_keyboard_focus(ui_c.graph_panel.expression.get_handle())
-                {
-                    ui_c.frame.set_focus();
-                }
             }
             event.skip(true);
         });

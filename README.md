@@ -23,12 +23,6 @@ So yes, you can run it on Linux natively too!
 
 <img width="2594" height="846" alt="image" src="https://github.com/user-attachments/assets/cfe00db3-28c4-47a0-9922-33281d58488d" />
 
-<br><br>
-Here is how the Linux version looks like (GTK4 needed):
-<br>
-<img width="1900" height="1334" alt="image" src="https://github.com/user-attachments/assets/43f15d64-b76c-4fba-9dab-562bcf047c1f" />
-
-
 
 
 ### Classic calculator interface
@@ -61,12 +55,17 @@ Some common shortcuts include:
 | `Enter` or `=` | Calculate the result |
 | `Backspace` | Delete the last digit |
 | `Delete` | Clear the current entry |
-| `Esc` | Clear the calculation |
+| `C` or `Esc` | Clear the calculation |
+| `Shift+C` | Enter hexadecimal C in Scientific mode |
 | `F9` | Change the sign |
 | `Ctrl+Insert` | Copy |
 | `Shift+Insert` | Paste an expression |
 
 Scientific mode also supports the original single-key function shortcuts.
+
+Use **Settings... → Keyboard Shortcuts** to select an action and click **Press key for [action]** to record a replacement key or Ctrl/Shift combination. You can also edit the shortcut field, separating alternatives with commas; use the names Plus and Comma for those punctuation keys. A blank field disables that action's keyboard bindings. Defaults are displayed for each action, and **Restore Defaults** resets the complete list. Changes take effect only after **Save** and are stored beside the executable in OpenCalc.cfg. Duplicate assignments are rejected. Graph editing and native text-selection commands retain their normal behavior.
+
+Keep the included Cargo.lock when building: it locks the wxDragon support libraries to versions compatible with wxdragon 0.9.17.
 
 ### Complete expression parsing
 

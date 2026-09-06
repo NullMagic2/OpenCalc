@@ -5,6 +5,7 @@
 //! Fixed GTK layouts preserve the recovered Windows 95 Calculator geometry,
 //! while one application CSS provider supplies the classic palette and bevels.
 
+use crate::shortcuts::{Action, Command, KeyChord, Shortcuts, DEFINITIONS};
 use crate::calc::{Base, BinaryOp, Calculator, Mode};
 use crate::calculation_log::CalculationLog;
 use crate::expr::AngleMode;
@@ -275,37 +276,6 @@ label.classic-help-label {
 }
 "#;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Action {
-    Digit(char),
-    Dot,
-    Back,
-    CE,
-    C,
-    Sign,
-    Eq,
-    Percent,
-    Bin(BinaryOp),
-    KeyboardStar,
-    Unary(&'static str),
-    MemC,
-    MemR,
-    MemS,
-    MemAdd,
-    Pi,
-    Open,
-    Close,
-    StatsOpen,
-    StatsDat,
-    StatsAvg,
-    StatsSum,
-    StatsDev,
-    ToggleFE,
-    Copy,
-    Paste,
-    About,
-    Help,
-}
 
 #[derive(Clone, Copy)]
 enum Tone {
@@ -332,6 +302,9 @@ struct MenuHandles {
     edit_label: gtk::Label,
     view_button: gtk::MenuButton,
     view_label: gtk::Label,
+    options_label: gtk::Label,
+    options_popover: gtk::Popover,
+    shortcuts: gtk::Button,
     help_button: gtk::MenuButton,
     help_label: gtk::Label,
     edit_popover: gtk::Popover,
@@ -686,6 +659,12 @@ fn build_menu_bar(strings: Strings) -> (gtk::Box, MenuHandles) {
     let (help_button, help_label) = menu_button(menu_text(strings.help_menu()));
     bar.append(&edit_button);
     bar.append(&view_button);
+    let (options_button, options_label) = menu_button(menu_text(strings.options_menu()));
+    let options_popover = classic_menu_popover();
+    let shortcuts = menu_item(strings.shortcuts_title());
+    options_popover.set_child(Some(&shortcuts));
+    options_button.set_popover(Some(&options_popover));
+    bar.append(&options_button);
     bar.append(&help_button);
 
     let edit_popover = classic_menu_popover();
@@ -741,6 +720,7 @@ fn build_menu_bar(strings: Strings) -> (gtk::Box, MenuHandles) {
     bind_menu_hover(&[
         edit_button.clone(),
         view_button.clone(),
+        options_button.clone(),
         help_button.clone(),
     ]);
 
@@ -751,6 +731,9 @@ fn build_menu_bar(strings: Strings) -> (gtk::Box, MenuHandles) {
             edit_label,
             view_button,
             view_label,
+            options_label,
+            options_popover,
+            shortcuts,
             help_button,
             help_label,
             edit_popover,
@@ -1208,6 +1191,10 @@ fn bind_selectors(ui: &Rc<Ui>) {
 }
 
 fn bind_menu(ui: &Rc<Ui>) {
+    connect_menu_item(&ui.menus.shortcuts, &ui.menus.options_popover, {
+        let ui = Rc::clone(ui);
+        move || show_shortcuts(&ui)
+    });
     connect_menu_item(&ui.menus.undo, &ui.menus.edit_popover, {
         let ui = Rc::clone(ui);
         move || undo(&ui)
@@ -1336,139 +1323,167 @@ fn select_all_focused_display(ui: &Ui) -> bool {
 }
 
 
+fn show_shortcuts(ui: &Rc<Ui>) {
+    let strings = strings_for(ui);
+    let dialog = gtk::Window::builder().title(strings.shortcuts_title())
+        .transient_for(&ui.window).modal(true).resizable(false).build();
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    content.set_margin_top(16);
+    content.set_margin_bottom(16);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
+    let action_label = gtk::Label::new(Some(strings.shortcut_action()));
+    action_label.set_xalign(0.0);
+    content.append(&action_label);
+    let labels: Vec<_> = DEFINITIONS.iter().map(|def| def.label).collect();
+    let choice = gtk::DropDown::from_strings(&labels);
+    content.append(&choice);
+    let keys_label = gtk::Label::new(Some(strings.shortcut_keys()));
+    keys_label.set_xalign(0.0);
+    content.append(&keys_label);
+    let draft = Rc::new(RefCell::new(ui.settings.borrow().shortcuts.texts()));
+    let entry = gtk::Entry::new();
+    entry.set_text(&draft.borrow()[0]);
+    content.append(&entry);
+    let recording = Rc::new(Cell::new(false));
+    let capture = gtk::Button::with_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[0].label));
+    let status = gtk::Label::new(None);
+    status.set_xalign(0.0);
+    content.append(&capture);
+    content.append(&status);
+    {
+        let recording = Rc::clone(&recording);
+        let status = status.clone();
+        capture.connect_clicked(move |button| {
+            recording.set(true);
+            status.set_label(strings.shortcut_listening());
+            button.grab_focus();
+        });
+    }
+    {
+        let entry = entry.clone();
+        let status = status.clone();
+        let controller = gtk::EventControllerKey::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_key_pressed(move |_, key, _, state| {
+            if !recording.get() { return glib::Propagation::Proceed; }
+            if state.contains(gdk::ModifierType::ALT_MASK) {
+                status.set_label("Alt shortcuts are reserved for menu navigation.");
+                return glib::Propagation::Stop;
+            }
+            if let Some(chord) = linux_key(key, state) {
+                entry.set_text(&chord.label());
+                recording.set(false);
+                status.set_label(strings.shortcut_recorded());
+            }
+            glib::Propagation::Stop
+        });
+        capture.add_controller(controller);
+    }
+    let default_label = gtk::Label::new(Some(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[0].defaults)));
+    default_label.set_xalign(0.0);
+    content.append(&default_label);
+    let instructions = gtk::Label::new(Some(strings.shortcut_instructions()));
+    instructions.set_xalign(0.0);
+    content.append(&instructions);
+    let error_label = gtk::Label::new(None);
+    error_label.set_wrap(true);
+    error_label.set_max_width_chars(70);
+    error_label.set_xalign(0.0);
+    content.append(&error_label);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let reset = gtk::Button::with_label(strings.restore_defaults());
+    let save = gtk::Button::with_label(strings.save());
+    let cancel = gtk::Button::with_label(strings.cancel());
+    row.append(&reset); row.append(&save); row.append(&cancel);
+    content.append(&row);
+    dialog.set_child(Some(&content));
+    {
+        let draft = Rc::clone(&draft);
+        let choice = choice.clone();
+        entry.connect_changed(move |entry| { draft.borrow_mut()[choice.selected() as usize] = entry.text().to_string(); });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let entry = entry.clone();
+        choice.connect_selected_notify(move |choice| {
+            let index = choice.selected() as usize;
+            capture.set_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[index].label));
+            let text = draft.borrow()[index].clone();
+            entry.set_text(&text);
+            default_label.set_label(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[index].defaults));
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let entry = entry.clone();
+        reset.connect_clicked(move |_| {
+            *draft.borrow_mut() = Shortcuts::default().texts();
+            let text = draft.borrow()[choice.selected() as usize].clone();
+            entry.set_text(&text);
+        });
+    }
+    {
+        let ui = Rc::clone(ui);
+        let dialog = dialog.clone();
+        save.connect_clicked(move |_| {
+            let shortcuts = match Shortcuts::from_texts(&draft.borrow()) {
+                Ok(shortcuts) => shortcuts,
+                Err(error) => { error_label.set_label(&error); return; }
+            };
+            let mut settings = ui.settings.borrow_mut();
+            let previous = std::mem::replace(&mut settings.shortcuts, shortcuts);
+            if let Err(error) = settings.save() {
+                settings.shortcuts = previous;
+                error_label.set_label(&error.to_string());
+                return;
+            }
+            dialog.close();
+        });
+    }
+    {
+        let dialog = dialog.clone();
+        cancel.connect_clicked(move |_| dialog.close());
+    }
+    dialog.present();
+    entry.grab_focus();
+}
+
+fn linux_key(key: gdk::Key, state: gdk::ModifierType) -> Option<KeyChord> {
+    let name = key.name().map(|name| name.to_string()).unwrap_or_default();
+    let name = if name.starts_with("KP_") { name } else { key.to_unicode().filter(|ch| !ch.is_control()).map(|ch| ch.to_string()).unwrap_or(name) };
+    KeyChord::new(&name, state.contains(gdk::ModifierType::CONTROL_MASK), state.contains(gdk::ModifierType::SHIFT_MASK)).ok()
+}
+
 fn handle_key(ui: &Rc<Ui>, key: gdk::Key, state: gdk::ModifierType) -> bool {
-    if state.contains(gdk::ModifierType::ALT_MASK) {
-        return false;
-    }
-    let control = state.contains(gdk::ModifierType::CONTROL_MASK);
-    let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
-    let ch = key.to_unicode();
-
-    if control {
-        return match ch.map(|value| value.to_ascii_lowercase()) {
-            Some('z') => {
-                undo(ui);
-                true
-            }
-            Some('y') => {
-                redo(ui);
-                true
-            }
-            Some('c') => {
-                perform(ui, Action::Copy);
-                true
-            }
-            Some('v') => {
-                perform(ui, Action::Paste);
-                true
-            }
-            Some('l') => {
-                perform(ui, Action::MemC);
-                true
-            }
-            Some('r') => {
-                perform(ui, Action::MemR);
-                true
-            }
-            Some('m') => {
-                perform(ui, Action::MemS);
-                true
-            }
-            Some('p') => {
-                perform(ui, Action::MemAdd);
-                true
-            }
-            Some('s') if ui.calc.borrow().mode == Mode::Scientific => {
-                perform(ui, Action::StatsOpen);
-                true
-            }
-            Some('a') if ui.calc.borrow().mode == Mode::Scientific => {
-                perform(ui, Action::StatsAvg);
-                true
-            }
-            Some('t') if ui.calc.borrow().mode == Mode::Scientific => {
-                perform(ui, Action::StatsSum);
-                true
-            }
-            Some('d') if ui.calc.borrow().mode == Mode::Scientific => {
-                perform(ui, Action::StatsDev);
-                true
-            }
-            _ => false,
-        };
-    }
-
-    if shift && key == gdk::Key::Insert {
-        perform(ui, Action::Paste);
-        return true;
-    }
-
-    let direct = match key {
-        gdk::Key::BackSpace => Some(Action::Back),
-        gdk::Key::Escape => Some(Action::C),
-        gdk::Key::Delete | gdk::Key::KP_Delete => Some(Action::CE),
-        gdk::Key::Return | gdk::Key::KP_Enter => Some(Action::Eq),
-        gdk::Key::KP_Add => Some(Action::Bin(BinaryOp::Add)),
-        gdk::Key::KP_Subtract => Some(Action::Bin(BinaryOp::Sub)),
-        gdk::Key::KP_Multiply => Some(Action::Bin(BinaryOp::Mul)),
-        gdk::Key::KP_Divide => Some(Action::Bin(BinaryOp::Div)),
-        gdk::Key::KP_Decimal => Some(Action::Dot),
-        gdk::Key::F1 => Some(Action::Help),
-        _ => None,
-    };
-    if let Some(action) = direct {
-        perform(ui, action);
-        return true;
-    }
-
-    let Some(ch) = ch else {
-        return false;
-    };
-    let mode = ui.calc.borrow().mode;
-    match ch {
-        '0'..='9' => perform(ui, Action::Digit(ch)),
-        'a'..='f' | 'A'..='F' => perform(ui, Action::Digit(ch)),
-        '.' | ',' => perform(ui, Action::Dot),
-        '+' => perform(ui, Action::Bin(BinaryOp::Add)),
-        '-' | '−' => perform(ui, Action::Bin(BinaryOp::Sub)),
-        '*' => perform(ui, Action::KeyboardStar),
-        '×' => perform(ui, Action::Bin(BinaryOp::Mul)),
-        '/' | '÷' => perform(ui, Action::Bin(BinaryOp::Div)),
-        '%' if mode == Mode::Scientific => perform(ui, Action::Bin(BinaryOp::Mod)),
-        '%' => perform(ui, Action::Percent),
-        '=' => perform(ui, Action::Eq),
-        '(' if mode == Mode::Scientific => perform(ui, Action::Open),
-        ')' if mode == Mode::Scientific => perform(ui, Action::Close),
-        '&' if mode == Mode::Scientific => perform(ui, Action::Bin(BinaryOp::And)),
-        '|' if mode == Mode::Scientific => perform(ui, Action::Bin(BinaryOp::Or)),
-        '^' if mode == Mode::Scientific => perform(ui, Action::Bin(BinaryOp::Xor)),
-        '<' if mode == Mode::Scientific => perform(ui, Action::Bin(BinaryOp::Lsh)),
-        '~' if mode == Mode::Scientific => perform(ui, Action::Unary("not")),
-        ';' if mode == Mode::Scientific => perform(ui, Action::Unary("int")),
-        _ => match ch.to_ascii_lowercase() {
-            'r' => perform(ui, Action::Unary("recip")),
-            's' if mode == Mode::Scientific => perform(ui, Action::Unary("sin")),
-            'o' if mode == Mode::Scientific => perform(ui, Action::Unary("cos")),
-            't' if mode == Mode::Scientific => perform(ui, Action::Unary("tan")),
-            'n' if mode == Mode::Scientific => perform(ui, Action::Unary("ln")),
-            'l' if mode == Mode::Scientific => perform(ui, Action::Unary("log")),
-            'm' if mode == Mode::Scientific => perform(ui, Action::Unary("dms")),
-            'x' if mode == Mode::Scientific => perform(ui, Action::Unary("exp")),
-            'y' if mode == Mode::Scientific => perform(ui, Action::Bin(BinaryOp::Pow)),
-            'p' if mode == Mode::Scientific => perform(ui, Action::Pi),
-            'i' if mode == Mode::Scientific => {
-                let active = !ui.calc.borrow().inv;
-                mutate_calculator(ui, |calc| calc.inv = active);
-                refresh(ui);
-            }
-            'h' if mode == Mode::Scientific => {
-                let active = !ui.calc.borrow().hyp;
-                mutate_calculator(ui, |calc| calc.hyp = active);
-                refresh(ui);
-            }
-            'v' if mode == Mode::Scientific => perform(ui, Action::ToggleFE),
-            _ => return false,
-        },
+    if state.contains(gdk::ModifierType::ALT_MASK) { return false; }
+    let Some(chord) = linux_key(key, state) else { return false; };
+    let scientific = ui.calc.borrow().mode == Mode::Scientific;
+    let command = ui.settings.borrow().shortcuts.resolve(&chord, scientific);
+    let Some(command) = command else { return false; };
+    match command {
+        Command::Button(action) => perform(ui, action),
+        Command::Percent => perform(ui, if scientific { Action::Bin(BinaryOp::Mod) } else { Action::Percent }),
+        Command::Square => perform(ui, Action::Unary(if scientific { "square" } else { "sqrt" })),
+        Command::Undo => undo(ui),
+        Command::Redo => redo(ui),
+        Command::Inv | Command::Hyp => {
+            mutate_calculator(ui, |calc| if command == Command::Inv { calc.inv = !calc.inv; } else { calc.hyp = !calc.hyp; });
+            refresh(ui);
+        }
+        Command::Base(base) => {
+            mutate_calculator(ui, |calc| calc.set_base(base));
+            refresh(ui); replot_existing_graph(ui);
+        }
+        Command::Angle(angle) => {
+            if ui.calc.borrow().base != Base::Dec { return false; }
+            mutate_calculator(ui, |calc| calc.angle = angle);
+            refresh(ui); replot_existing_graph(ui);
+        }
+        Command::F6 => {
+            mutate_calculator(ui, |calc| if calc.base == Base::Dec { calc.angle = AngleMode::Radians; } else { calc.set_base(Base::Dec); });
+            refresh(ui); replot_existing_graph(ui);
+        }
     }
     true
 }
@@ -1985,13 +2000,15 @@ fn apply_language(ui: &Ui) {
     ui.window.set_title(Some(strings.calculator_title()));
     ui.menus.edit_label.set_label(&menu_text(strings.edit_menu()));
     ui.menus.view_label.set_label(&menu_text(strings.view_menu()));
+    ui.menus.options_label.set_label(&menu_text(strings.options_menu()));
+    ui.menus.shortcuts.set_label(strings.shortcuts_title());
     ui.menus.help_label.set_label(&menu_text(strings.help_menu()));
 
-    ui.menus.undo.set_label(&menu_text(strings.undo()));
-    ui.menus.redo.set_label(&menu_text(strings.redo()));
-    ui.menus.copy.set_label(&menu_text(strings.copy()));
-    ui.menus.paste.set_label(&menu_text(strings.paste()));
-    ui.menus.help_topics.set_label(&menu_text(strings.help_topics()));
+    ui.menus.undo.set_label(&menu_text(strings.undo().split('\t').next().unwrap()));
+    ui.menus.redo.set_label(&menu_text(strings.redo().split('\t').next().unwrap()));
+    ui.menus.copy.set_label(&menu_text(strings.copy().split('\t').next().unwrap()));
+    ui.menus.paste.set_label(&menu_text(strings.paste().split('\t').next().unwrap()));
+    ui.menus.help_topics.set_label(&menu_text(strings.help_topics().split('\t').next().unwrap()));
     ui.menus.about.set_label(&menu_text(strings.about_opencalc()));
 
     ui.history_panel.title.set_label(strings.history_title());

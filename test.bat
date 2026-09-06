@@ -1,2 +1,2 @@
 @echo off
-cargo test
+cargo test --locked

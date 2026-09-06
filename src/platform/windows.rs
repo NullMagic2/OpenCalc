@@ -236,8 +236,6 @@ const SWP_NOACTIVATE: Uint = 0x0010;
 const SWP_FRAMECHANGED: Uint = 0x0020;
 const GWL_STYLE: i32 = -16;
 const GWLP_HWNDPARENT: i32 = -8;
-const WS_THICKFRAME: i32 = 0x0004_0000;
-const WS_MAXIMIZEBOX: i32 = 0x0001_0000;
 const MONITOR_DEFAULTTONEAREST: Uint = 0x0000_0002;
 const SIZE_RESTORED: usize = 0;
 const SIZE_MINIMIZED: usize = 1;
@@ -268,7 +266,6 @@ unsafe extern "system" {
     fn GetWindowRect(hwnd: Hwnd, rect: *mut Rect) -> Bool;
     fn MonitorFromWindow(hwnd: Hwnd, flags: Uint) -> Hmonitor;
     fn GetMonitorInfoW(monitor: Hmonitor, info: *mut MonitorInfo) -> Bool;
-    fn ClientToScreen(hwnd: Hwnd, point: *mut Point) -> Bool;
     fn GetDpiForWindow(hwnd: Hwnd) -> Uint;
     fn GetWindowLongW(hwnd: Hwnd, index: i32) -> i32;
     fn SetWindowLongW(hwnd: Hwnd, index: i32, value: i32) -> i32;

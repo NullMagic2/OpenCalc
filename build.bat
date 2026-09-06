@@ -7,7 +7,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-cargo build --release
+cargo build --release --locked
 if errorlevel 1 exit /b 1
 
 copy /Y target\release\OpenCalc.exe OpenCalc.exe >nul
