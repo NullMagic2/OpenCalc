@@ -296,6 +296,40 @@ impl Strings {
     pub const fn shortcut_action(self) -> &'static str {
         match self.language { Language::English => "Action", Language::Portuguese => "Ação", Language::Spanish => "Acción" }
     }
+    pub const fn shortcut_search(self) -> &'static str {
+        match self.language { Language::English => "Search shortcuts", Language::Portuguese => "Pesquisar atalhos", Language::Spanish => "Buscar atajos" }
+    }
+    pub const fn shortcut_assignment_section(self) -> &'static str {
+        match self.language { Language::English => "Shortcut assignment", Language::Portuguese => "Atribuição de atalhos", Language::Spanish => "Asignación de atajos" }
+    }
+    pub const fn shortcut_presets_section(self) -> &'static str {
+        match self.language { Language::English => "Shortcut presets", Language::Portuguese => "Predefinições de atalhos", Language::Spanish => "Preajustes de atajos" }
+    }
+    pub const fn shortcut_preset(self) -> &'static str {
+        match self.language { Language::English => "Preset", Language::Portuguese => "Predefinição", Language::Spanish => "Preajuste" }
+    }
+    pub const fn shortcut_available_presets(self) -> &'static str {
+        match self.language { Language::English => "Available presets", Language::Portuguese => "Predefinições disponíveis", Language::Spanish => "Preajustes disponibles" }
+    }
+    pub const fn shortcut_load_preset(self) -> &'static str {
+        match self.language { Language::English => "Load Preset", Language::Portuguese => "Carregar predefinição", Language::Spanish => "Cargar preajuste" }
+    }
+    pub const fn shortcut_save_preset(self) -> &'static str {
+        match self.language { Language::English => "Save Preset", Language::Portuguese => "Salvar predefinição", Language::Spanish => "Guardar preajuste" }
+    }
+    pub const fn shortcut_delete_preset(self) -> &'static str {
+        match self.language { Language::English => "Delete Preset", Language::Portuguese => "Excluir predefinição", Language::Spanish => "Eliminar preajuste" }
+    }
+    pub fn shortcut_delete_confirmation(self, name: &str) -> String {
+        match self.language {
+            Language::English => format!("Delete shortcut preset \"{name}\"?\n\nThis cannot be undone."),
+            Language::Portuguese => format!("Excluir a predefinição de atalhos \"{name}\"?\n\nEsta ação não pode ser desfeita."),
+            Language::Spanish => format!("¿Eliminar el preajuste de atajos \"{name}\"?\n\nEsta acción no se puede deshacer."),
+        }
+    }
+    pub const fn shortcut_refresh_presets(self) -> &'static str {
+        match self.language { Language::English => "Refresh", Language::Portuguese => "Atualizar", Language::Spanish => "Actualizar" }
+    }
     pub const fn shortcut_keys(self) -> &'static str {
         match self.language { Language::English => "Shortcuts (separate alternatives with commas)", Language::Portuguese => "Atalhos (separe alternativas com vírgulas)", Language::Spanish => "Atajos (separe alternativas con comas)" }
     }
@@ -310,6 +344,13 @@ impl Strings {
             Language::English => "Examples: C, Escape or Ctrl+Shift+K. Use Plus and Comma for punctuation.\nLeave blank to disable. Defaults: C clears; Shift+C enters hex C.\nText selection and graph editing keep their native shortcuts.",
             Language::Portuguese => "Exemplos: C, Escape ou Ctrl+Shift+K. Use Plus e Comma para + e vírgula.\nVazio desativa. C limpa; Shift+C insere C hexadecimal.\nSeleção de texto e edição do gráfico mantêm seus atalhos nativos.",
             Language::Spanish => "Ejemplos: C, Escape o Ctrl+Shift+K. Use Plus y Comma para + y coma.\nVacío desactiva. C borra; Shift+C introduce C hexadecimal.\nLa selección de texto y el gráfico conservan sus atajos nativos.",
+        }
+    }
+    pub const fn shortcut_preset_instructions(self) -> &'static str {
+        match self.language {
+            Language::English => "Choose an existing preset or type a new name. Presets are plain-text shortcuts/*.cfg files.\nRestore Defaults always uses OpenCalc's pristine built-in shortcut table.",
+            Language::Portuguese => "Escolha uma predefinição existente ou digite um novo nome. As predefinições são arquivos de texto shortcuts/*.cfg.\nRestaurar padrões sempre usa a tabela interna intacta do OpenCalc.",
+            Language::Spanish => "Elija un preajuste existente o escriba un nombre nuevo. Los preajustes son archivos de texto shortcuts/*.cfg.\nRestaurar valores siempre usa la tabla interna intacta de OpenCalc.",
         }
     }
 

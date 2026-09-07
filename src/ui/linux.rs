@@ -5,8 +5,11 @@
 //! Fixed GTK layouts preserve the recovered Windows 95 Calculator geometry,
 //! while one application CSS provider supplies the classic palette and bevels.
 
-use crate::shortcuts::{Action, Command, KeyChord, Shortcuts, DEFINITIONS};
-use crate::calc::{Base, BinaryOp, Calculator, Mode};
+use crate::shortcuts::{
+    delete_preset, find_shortcut, load_preset, preset_names, save_preset, Action, Command,
+    KeyChord, Shortcuts, DEFINITIONS,
+};
+use crate::calc::{Base, BinaryOp, Calculator, Mode, WordSize};
 use crate::calculation_log::CalculationLog;
 use crate::expr::AngleMode;
 use crate::graph::{format_root_values, ExportFormat, GraphModel, RootResult, Viewport};
@@ -1135,6 +1138,15 @@ fn bind_action_buttons(ui: &Rc<Ui>) {
     }
 }
 
+fn calculator_error_locked(ui: &Ui) -> bool {
+    if ui.calc.borrow().error.is_some() {
+        platform::invalid_input_beep();
+        true
+    } else {
+        false
+    }
+}
+
 fn bind_selectors(ui: &Rc<Ui>) {
     for (index, base) in [Base::Hex, Base::Dec, Base::Oct, Base::Bin]
         .into_iter()
@@ -1144,6 +1156,10 @@ fn bind_selectors(ui: &Rc<Ui>) {
         let ui = Rc::clone(ui);
         radio.connect_toggled(move |radio| {
             if radio.is_active() && ui.calc.borrow().base != base {
+                if calculator_error_locked(&ui) {
+                    refresh(&ui);
+                    return;
+                }
                 mutate_calculator(&ui, |calc| calc.set_base(base));
                 refresh(&ui);
                 replot_existing_graph(&ui);
@@ -1151,17 +1167,41 @@ fn bind_selectors(ui: &Rc<Ui>) {
         });
     }
 
-    for (index, angle) in [AngleMode::Degrees, AngleMode::Radians, AngleMode::Grads]
-        .into_iter()
-        .enumerate()
-    {
+    for index in 0..ui.angle_radios.len() {
         let radio = ui.angle_radios[index].clone();
         let ui = Rc::clone(ui);
         radio.connect_toggled(move |radio| {
-            if radio.is_active() && ui.calc.borrow().angle != angle {
-                mutate_calculator(&ui, |calc| calc.angle = angle);
-                refresh(&ui);
-                replot_existing_graph(&ui);
+            if !radio.is_active() {
+                return;
+            }
+            const ANGLES: [AngleMode; 3] = [
+                AngleMode::Degrees,
+                AngleMode::Radians,
+                AngleMode::Grads,
+            ];
+            const WORD_SIZES: [WordSize; 3] =
+                [WordSize::Dword, WordSize::Word, WordSize::Byte];
+            if ui.calc.borrow().base == Base::Dec {
+                let angle = ANGLES[index];
+                if ui.calc.borrow().angle != angle {
+                    if calculator_error_locked(&ui) {
+                        refresh(&ui);
+                        return;
+                    }
+                    mutate_calculator(&ui, |calc| calc.angle = angle);
+                    refresh(&ui);
+                    replot_existing_graph(&ui);
+                }
+            } else {
+                let word_size = WORD_SIZES[index];
+                if ui.calc.borrow().word_size != word_size {
+                    if calculator_error_locked(&ui) {
+                        refresh(&ui);
+                        return;
+                    }
+                    mutate_calculator(&ui, |calc| calc.set_word_size(word_size));
+                    refresh(&ui);
+                }
             }
         });
     }
@@ -1172,6 +1212,10 @@ fn bind_selectors(ui: &Rc<Ui>) {
         check.connect_toggled(move |check| {
             let active = check.is_active();
             if ui.calc.borrow().inv != active {
+                if calculator_error_locked(&ui) {
+                    refresh(&ui);
+                    return;
+                }
                 mutate_calculator(&ui, |calc| calc.inv = active);
                 refresh(&ui);
             }
@@ -1183,6 +1227,10 @@ fn bind_selectors(ui: &Rc<Ui>) {
         check.connect_toggled(move |check| {
             let active = check.is_active();
             if ui.calc.borrow().hyp != active {
+                if calculator_error_locked(&ui) {
+                    refresh(&ui);
+                    return;
+                }
                 mutate_calculator(&ui, |calc| calc.hyp = active);
                 refresh(&ui);
             }
@@ -1323,85 +1371,203 @@ fn select_all_focused_display(ui: &Ui) -> bool {
 }
 
 
+#[allow(deprecated)]
+fn linux_preset_combo_text(combo: &gtk::ComboBoxText) -> String {
+    combo.active_text().map(|text| text.to_string()).unwrap_or_default()
+}
+
+#[allow(deprecated)]
+fn refresh_linux_preset_combo(combo: &gtk::ComboBoxText, preferred: &str) -> Vec<String> {
+    let names = preset_names().unwrap_or_default();
+    combo.remove_all();
+    for name in &names {
+        combo.append_text(name);
+    }
+
+    if let Some(index) = names.iter().position(|name| name == preferred) {
+        combo.set_active(Some(index as u32));
+    } else if !preferred.trim().is_empty() {
+        combo.set_active(None);
+        if let Some(entry) = combo.child().and_then(|child| child.downcast::<gtk::Entry>().ok()) {
+            entry.set_text(preferred);
+        }
+    } else if let Some(index) = names.iter().position(|name| name == "default") {
+        combo.set_active(Some(index as u32));
+    } else if !names.is_empty() {
+        combo.set_active(Some(0));
+    }
+
+    names
+}
+
 fn show_shortcuts(ui: &Rc<Ui>) {
     let strings = strings_for(ui);
-    let dialog = gtk::Window::builder().title(strings.shortcuts_title())
-        .transient_for(&ui.window).modal(true).resizable(false).build();
+    let dialog = gtk::Window::builder()
+        .title(strings.shortcuts_title())
+        .transient_for(&ui.window)
+        .modal(true)
+        .resizable(false)
+        .build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
     content.set_margin_top(16);
     content.set_margin_bottom(16);
     content.set_margin_start(16);
     content.set_margin_end(16);
+
+    // --- Shortcut assignment section -------------------------------------------------
+    let assignment_frame = gtk::Frame::builder()
+        .label(strings.shortcut_assignment_section())
+        .build();
+    let assignment = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    assignment.set_margin_top(10);
+    assignment.set_margin_bottom(10);
+    assignment.set_margin_start(10);
+    assignment.set_margin_end(10);
+
+    let search_label = gtk::Label::new(Some(strings.shortcut_search()));
+    search_label.set_xalign(0.0);
+    assignment.append(&search_label);
+    let search = gtk::Entry::new();
+    assignment.append(&search);
+
     let action_label = gtk::Label::new(Some(strings.shortcut_action()));
     action_label.set_xalign(0.0);
-    content.append(&action_label);
+    assignment.append(&action_label);
     let labels: Vec<_> = DEFINITIONS.iter().map(|def| def.label).collect();
     let choice = gtk::DropDown::from_strings(&labels);
-    content.append(&choice);
-    let keys_label = gtk::Label::new(Some(strings.shortcut_keys()));
-    keys_label.set_xalign(0.0);
-    content.append(&keys_label);
+    assignment.append(&choice);
+
     let draft = Rc::new(RefCell::new(ui.settings.borrow().shortcuts.texts()));
-    let entry = gtk::Entry::new();
-    entry.set_text(&draft.borrow()[0]);
-    content.append(&entry);
     let recording = Rc::new(Cell::new(false));
     let capture = gtk::Button::with_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[0].label));
-    let status = gtk::Label::new(None);
-    status.set_xalign(0.0);
-    content.append(&capture);
-    content.append(&status);
-    {
-        let recording = Rc::clone(&recording);
-        let status = status.clone();
-        capture.connect_clicked(move |button| {
-            recording.set(true);
-            status.set_label(strings.shortcut_listening());
-            button.grab_focus();
-        });
-    }
-    {
-        let entry = entry.clone();
-        let status = status.clone();
-        let controller = gtk::EventControllerKey::new();
-        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-        controller.connect_key_pressed(move |_, key, _, state| {
-            if !recording.get() { return glib::Propagation::Proceed; }
-            if state.contains(gdk::ModifierType::ALT_MASK) {
-                status.set_label("Alt shortcuts are reserved for menu navigation.");
-                return glib::Propagation::Stop;
-            }
-            if let Some(chord) = linux_key(key, state) {
-                entry.set_text(&chord.label());
-                recording.set(false);
-                status.set_label(strings.shortcut_recorded());
-            }
-            glib::Propagation::Stop
-        });
-        capture.add_controller(controller);
-    }
+    assignment.append(&capture);
+    let shortcut_status = gtk::Label::new(None);
+    shortcut_status.set_xalign(0.0);
+    assignment.append(&shortcut_status);
+
+    let keys_label = gtk::Label::new(Some(strings.shortcut_keys()));
+    keys_label.set_xalign(0.0);
+    assignment.append(&keys_label);
+    let entry = gtk::Entry::new();
+    entry.set_text(&draft.borrow()[0]);
+    assignment.append(&entry);
+
     let default_label = gtk::Label::new(Some(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[0].defaults)));
     default_label.set_xalign(0.0);
-    content.append(&default_label);
+    assignment.append(&default_label);
     let instructions = gtk::Label::new(Some(strings.shortcut_instructions()));
     instructions.set_xalign(0.0);
-    content.append(&instructions);
+    instructions.set_wrap(true);
+    assignment.append(&instructions);
+    assignment_frame.set_child(Some(&assignment));
+    content.append(&assignment_frame);
+
+    // --- Preset section --------------------------------------------------------------
+    let preset_frame = gtk::Frame::builder()
+        .label(strings.shortcut_presets_section())
+        .build();
+    let preset_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    preset_box.set_margin_top(10);
+    preset_box.set_margin_bottom(10);
+    preset_box.set_margin_start(10);
+    preset_box.set_margin_end(10);
+
+    let preset_label = gtk::Label::new(Some(strings.shortcut_preset()));
+    preset_label.set_xalign(0.0);
+    preset_box.append(&preset_label);
+    #[allow(deprecated)]
+    let preset_name = gtk::ComboBoxText::with_entry();
+    #[allow(deprecated)]
+    refresh_linux_preset_combo(&preset_name, "default");
+    preset_box.append(&preset_name);
+
+    let preset_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let load_preset_button = gtk::Button::with_label(strings.shortcut_load_preset());
+    let save_preset_button = gtk::Button::with_label(strings.shortcut_save_preset());
+    let delete_preset_button = gtk::Button::with_label(strings.shortcut_delete_preset());
+    let refresh_presets_button = gtk::Button::with_label(strings.shortcut_refresh_presets());
+    preset_row.append(&load_preset_button);
+    preset_row.append(&save_preset_button);
+    preset_row.append(&delete_preset_button);
+    preset_row.append(&refresh_presets_button);
+    preset_box.append(&preset_row);
+
+    let preset_instructions = gtk::Label::new(Some(strings.shortcut_preset_instructions()));
+    preset_instructions.set_xalign(0.0);
+    preset_instructions.set_wrap(true);
+    preset_box.append(&preset_instructions);
+    let preset_status = gtk::Label::new(None);
+    preset_status.set_xalign(0.0);
+    preset_box.append(&preset_status);
+    preset_frame.set_child(Some(&preset_box));
+    content.append(&preset_frame);
+
     let error_label = gtk::Label::new(None);
     error_label.set_wrap(true);
     error_label.set_max_width_chars(70);
     error_label.set_xalign(0.0);
     content.append(&error_label);
+
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     let reset = gtk::Button::with_label(strings.restore_defaults());
     let save = gtk::Button::with_label(strings.save());
     let cancel = gtk::Button::with_label(strings.cancel());
-    row.append(&reset); row.append(&save); row.append(&cancel);
+    row.append(&reset);
+    row.append(&save);
+    row.append(&cancel);
     content.append(&row);
     dialog.set_child(Some(&content));
+
+    {
+        let recording = Rc::clone(&recording);
+        let shortcut_status = shortcut_status.clone();
+        capture.connect_clicked(move |button| {
+            recording.set(true);
+            shortcut_status.set_label(strings.shortcut_listening());
+            button.grab_focus();
+        });
+    }
+    {
+        let entry = entry.clone();
+        let shortcut_status = shortcut_status.clone();
+        let controller = gtk::EventControllerKey::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_key_pressed(move |_, key, _, state| {
+            if !recording.get() {
+                return glib::Propagation::Proceed;
+            }
+            if state.contains(gdk::ModifierType::ALT_MASK) {
+                shortcut_status.set_label("Alt shortcuts are reserved for menu navigation.");
+                return glib::Propagation::Stop;
+            }
+            if let Some(chord) = linux_key(key, state) {
+                entry.set_text(&chord.label());
+                recording.set(false);
+                shortcut_status.set_label(strings.shortcut_recorded());
+            }
+            glib::Propagation::Stop
+        });
+        capture.add_controller(controller);
+    }
     {
         let draft = Rc::clone(&draft);
         let choice = choice.clone();
-        entry.connect_changed(move |entry| { draft.borrow_mut()[choice.selected() as usize] = entry.text().to_string(); });
+        entry.connect_changed(move |entry| {
+            draft.borrow_mut()[choice.selected() as usize] = entry.text().to_string();
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let choice = choice.clone();
+        search.connect_changed(move |search| {
+            let index = {
+                let draft_ref = draft.borrow();
+                find_shortcut(search.text().as_str(), &draft_ref)
+            };
+            if let Some(index) = index {
+                choice.set_selected(index as u32);
+            }
+        });
     }
     {
         let draft = Rc::clone(&draft);
@@ -1417,10 +1583,108 @@ fn show_shortcuts(ui: &Rc<Ui>) {
     {
         let draft = Rc::clone(&draft);
         let entry = entry.clone();
+        let choice = choice.clone();
+        let shortcut_status = shortcut_status.clone();
         reset.connect_clicked(move |_| {
             *draft.borrow_mut() = Shortcuts::default().texts();
             let text = draft.borrow()[choice.selected() as usize].clone();
             entry.set_text(&text);
+            shortcut_status.set_label("Defaults restored in this dialog. Save to apply them.");
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let entry = entry.clone();
+        let choice = choice.clone();
+        let preset_name = preset_name.clone();
+        let preset_status = preset_status.clone();
+        let error_label = error_label.clone();
+        load_preset_button.connect_clicked(move |_| {
+            let name = linux_preset_combo_text(&preset_name);
+            match load_preset(&name) {
+                Ok(shortcuts) => {
+                    *draft.borrow_mut() = shortcuts.texts();
+                    let text = draft.borrow()[choice.selected() as usize].clone();
+                    entry.set_text(&text);
+                    preset_status.set_label("Preset loaded. Save to apply it to OpenCalc.");
+                    error_label.set_label("");
+                }
+                Err(error) => error_label.set_label(&error),
+            }
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let preset_name = preset_name.clone();
+        let preset_status = preset_status.clone();
+        let error_label = error_label.clone();
+        save_preset_button.connect_clicked(move |_| {
+            let shortcuts = match Shortcuts::from_texts(&draft.borrow()) {
+                Ok(shortcuts) => shortcuts,
+                Err(error) => {
+                    error_label.set_label(&error);
+                    return;
+                }
+            };
+            let name = linux_preset_combo_text(&preset_name);
+            match save_preset(&name, &shortcuts) {
+                Ok(path) => {
+                    refresh_linux_preset_combo(&preset_name, &name);
+                    preset_status.set_label(&format!("Preset saved: {}", path.display()));
+                    error_label.set_label("");
+                }
+                Err(error) => error_label.set_label(&error),
+            }
+        });
+    }
+    {
+        let preset_name = preset_name.clone();
+        let preset_status = preset_status.clone();
+        let error_label = error_label.clone();
+        let parent = dialog.clone();
+        delete_preset_button.connect_clicked(move |_| {
+            let name = linux_preset_combo_text(&preset_name);
+            if name.trim().is_empty() {
+                error_label.set_label("Choose a preset to delete.");
+                return;
+            }
+
+            let confirmation = gtk::AlertDialog::builder()
+                .message(strings.shortcut_delete_preset())
+                .detail(strings.shortcut_delete_confirmation(&name))
+                .modal(true)
+                .build();
+            confirmation.set_buttons(&[strings.cancel(), strings.shortcut_delete_preset()]);
+            confirmation.set_cancel_button(0);
+            confirmation.set_default_button(0);
+
+            let preset_name = preset_name.clone();
+            let preset_status = preset_status.clone();
+            let error_label = error_label.clone();
+            confirmation.choose(Some(&parent), None::<&gio::Cancellable>, move |response| {
+                if !matches!(response, Ok(1)) {
+                    return;
+                }
+                match delete_preset(&name) {
+                    Ok(()) => {
+                        refresh_linux_preset_combo(&preset_name, "");
+                        preset_status.set_label("Preset deleted.");
+                        error_label.set_label("");
+                    }
+                    Err(error) => error_label.set_label(&error),
+                }
+            });
+        });
+    }
+    {
+        let preset_name = preset_name.clone();
+        let preset_status = preset_status.clone();
+        let error_label = error_label.clone();
+        refresh_presets_button.connect_clicked(move |_| {
+            let current = linux_preset_combo_text(&preset_name);
+            refresh_linux_preset_combo(&preset_name, &current);
+            preset_status.set_label("Preset list refreshed.");
+            error_label.set_label("");
         });
     }
     {
@@ -1429,7 +1693,10 @@ fn show_shortcuts(ui: &Rc<Ui>) {
         save.connect_clicked(move |_| {
             let shortcuts = match Shortcuts::from_texts(&draft.borrow()) {
                 Ok(shortcuts) => shortcuts,
-                Err(error) => { error_label.set_label(&error); return; }
+                Err(error) => {
+                    error_label.set_label(&error);
+                    return;
+                }
             };
             let mut settings = ui.settings.borrow_mut();
             let previous = std::mem::replace(&mut settings.shortcuts, shortcuts);
@@ -1446,7 +1713,7 @@ fn show_shortcuts(ui: &Rc<Ui>) {
         cancel.connect_clicked(move |_| dialog.close());
     }
     dialog.present();
-    entry.grab_focus();
+    search.grab_focus();
 }
 
 fn linux_key(key: gdk::Key, state: gdk::ModifierType) -> Option<KeyChord> {
@@ -1461,6 +1728,18 @@ fn handle_key(ui: &Rc<Ui>, key: gdk::Key, state: gdk::ModifierType) -> bool {
     let scientific = ui.calc.borrow().mode == Mode::Scientific;
     let command = ui.settings.borrow().shortcuts.resolve(&chord, scientific);
     let Some(command) = command else { return false; };
+    // In Standard mode F2-F8 are selector accelerators routed through Decimal
+    // by CALC.EXE. Do not let them alter hidden Scientific selector state.
+    if !scientific
+        && matches!(command, Command::Base(_) | Command::Angle(_) | Command::Word | Command::F6)
+    {
+        if calculator_error_locked(ui) { return true; }
+        if ui.calc.borrow().base != Base::Dec {
+            mutate_calculator(ui, |calc| calc.set_base(Base::Dec));
+        }
+        refresh(ui);
+        return true;
+    }
     match command {
         Command::Button(action) => perform(ui, action),
         Command::Percent => perform(ui, if scientific { Action::Bin(BinaryOp::Mod) } else { Action::Percent }),
@@ -1468,20 +1747,43 @@ fn handle_key(ui: &Rc<Ui>, key: gdk::Key, state: gdk::ModifierType) -> bool {
         Command::Undo => undo(ui),
         Command::Redo => redo(ui),
         Command::Inv | Command::Hyp => {
+            if calculator_error_locked(ui) { return true; }
             mutate_calculator(ui, |calc| if command == Command::Inv { calc.inv = !calc.inv; } else { calc.hyp = !calc.hyp; });
             refresh(ui);
         }
         Command::Base(base) => {
+            if calculator_error_locked(ui) { return true; }
             mutate_calculator(ui, |calc| calc.set_base(base));
             refresh(ui); replot_existing_graph(ui);
         }
         Command::Angle(angle) => {
-            if ui.calc.borrow().base != Base::Dec { return false; }
-            mutate_calculator(ui, |calc| calc.angle = angle);
-            refresh(ui); replot_existing_graph(ui);
+            if calculator_error_locked(ui) { return true; }
+            if ui.calc.borrow().base == Base::Dec {
+                mutate_calculator(ui, |calc| calc.angle = angle);
+                refresh(ui); replot_existing_graph(ui);
+            } else {
+                let word_size = match angle {
+                    AngleMode::Degrees => WordSize::Dword,
+                    AngleMode::Grads => WordSize::Byte,
+                    AngleMode::Radians => return false,
+                };
+                mutate_calculator(ui, |calc| calc.set_word_size(word_size));
+                refresh(ui);
+            }
+        }
+        Command::Word => {
+            if calculator_error_locked(ui) { return true; }
+            if ui.calc.borrow().base == Base::Dec {
+                mutate_calculator(ui, |calc| calc.angle = AngleMode::Radians);
+                refresh(ui); replot_existing_graph(ui);
+            } else {
+                mutate_calculator(ui, |calc| calc.set_word_size(WordSize::Word));
+                refresh(ui);
+            }
         }
         Command::F6 => {
-            mutate_calculator(ui, |calc| if calc.base == Base::Dec { calc.angle = AngleMode::Radians; } else { calc.set_base(Base::Dec); });
+            if calculator_error_locked(ui) { return true; }
+            mutate_calculator(ui, |calc| calc.set_base(Base::Dec));
             refresh(ui); replot_existing_graph(ui);
         }
     }
@@ -1665,9 +1967,26 @@ fn bind_context_help(ui: &Rc<Ui>) {
             let Some(picked) = root.pick(x, y, flags) else {
                 return;
             };
-            let Some(key) = targets.iter().find_map(|(widget, key)| {
-                (picked == widget.clone() || picked.is_ancestor(widget)).then_some(*key)
-            }) else {
+            let secondary_keys = if ui.calc.borrow().base == Base::Dec {
+                ["deg", "rad", "grad"]
+            } else {
+                ["dword", "word", "byte"]
+            };
+            let key = ui
+                .angle_radios
+                .iter()
+                .enumerate()
+                .find_map(|(index, radio)| {
+                    let widget: gtk::Widget = radio.clone().upcast();
+                    (picked == widget || picked.is_ancestor(&widget))
+                        .then_some(secondary_keys[index])
+                })
+                .or_else(|| {
+                    targets.iter().find_map(|(widget, key)| {
+                        (picked == widget.clone() || picked.is_ancestor(widget)).then_some(*key)
+                    })
+                });
+            let Some(key) = key else {
                 return;
             };
 
@@ -1743,6 +2062,15 @@ fn strings_for(ui: &Ui) -> Strings {
 }
 
 fn perform(ui: &Rc<Ui>, action: Action) {
+    // Error display is modal for calculator commands. C and CE recover;
+    // Copy/Help/About remain ordinary application UI commands.
+    if ui.calc.borrow().error.is_some()
+        && !matches!(action, Action::C | Action::CE | Action::Copy | Action::Help | Action::About)
+    {
+        platform::invalid_input_beep();
+        return;
+    }
+
     match action {
         Action::Copy => {
             let clipboard = ui.window.clipboard();
@@ -1788,6 +2116,24 @@ fn perform(ui: &Rc<Ui>, action: Action) {
         _ => {}
     }
 
+    let rejected_input = {
+        let calc = ui.calc.borrow();
+        match action {
+            Action::Digit(ch) => !calc.can_accept_digit(ch),
+            Action::Dot => !calc.can_accept_decimal_point(),
+            Action::Back => !calc.can_backspace(),
+            Action::Sign => !calc.can_toggle_sign(),
+            Action::Pi => !calc.can_use_pi(),
+            Action::Exp => !calc.can_start_exponent_entry(),
+            Action::Close => !calc.can_close_paren(),
+            _ => false,
+        }
+    };
+    if rejected_input {
+        platform::invalid_input_beep();
+        return;
+    }
+
     let history_expression = {
         let calc = ui.calc.borrow();
         history_expression_before_action(&calc, action)
@@ -1805,11 +2151,12 @@ fn perform(ui: &Rc<Ui>, action: Action) {
         Action::Bin(op) => calc.binary(op),
         Action::KeyboardStar => calc.keyboard_star(),
         Action::Unary(name) => calc.unary(name),
+        Action::Exp => { calc.exponent_entry(); },
         Action::MemC => calc.memory_clear(),
         Action::MemR => calc.memory_recall(),
         Action::MemS => calc.memory_store(),
         Action::MemAdd => calc.memory_add(),
-        Action::Pi => calc.set_value(std::f64::consts::PI),
+        Action::Pi => { calc.pi(); },
         Action::Open => calc.open_paren(),
         Action::Close => calc.close_paren(),
         Action::StatsDat => calc.stat_dat(),
@@ -1882,6 +2229,12 @@ fn refresh_history_menu(ui: &Ui) {
 }
 
 fn set_mode(ui: &Rc<Ui>, mode: Mode) {
+    if mode == Mode::Standard {
+        let existing = ui.stats_box.borrow_mut().take();
+        if let Some(stats) = existing {
+            stats.window.close();
+        }
+    }
     if ui.calc.borrow().mode != mode {
         mutate_calculator(ui, |calc| calc.set_mode(mode));
     }
@@ -2114,13 +2467,28 @@ fn refresh(ui: &Ui) {
     for (index, radio) in ui.base_radios.iter().enumerate() {
         radio.set_active(index == base_index);
     }
-    let angle_index = match calc.angle {
-        AngleMode::Degrees => 0,
-        AngleMode::Radians => 1,
-        AngleMode::Grads => 2,
+    let (secondary_labels, secondary_index) = if calc.base == Base::Dec {
+        (
+            ["Deg", "Rad", "Grad"],
+            match calc.angle {
+                AngleMode::Degrees => 0,
+                AngleMode::Radians => 1,
+                AngleMode::Grads => 2,
+            },
+        )
+    } else {
+        (
+            ["Dword", "Word", "Byte"],
+            match calc.word_size {
+                WordSize::Dword => 0,
+                WordSize::Word => 1,
+                WordSize::Byte => 2,
+            },
+        )
     };
     for (index, radio) in ui.angle_radios.iter().enumerate() {
-        radio.set_active(index == angle_index);
+        radio.set_label(Some(secondary_labels[index]));
+        radio.set_active(index == secondary_index);
     }
     drop(calc);
     refresh_stats(ui);
@@ -2156,6 +2524,7 @@ fn binary_history_symbol(op: BinaryOp) -> &'static str {
         BinaryOp::Or => "or",
         BinaryOp::Xor => "xor",
         BinaryOp::Lsh => "lsh",
+        BinaryOp::Rsh => "rsh",
     }
 }
 
@@ -2626,14 +2995,14 @@ fn action_help_key(action: Action) -> &'static str {
         Action::Bin(BinaryOp::And) => "and",
         Action::Bin(BinaryOp::Or) => "or",
         Action::Bin(BinaryOp::Xor) => "xor",
-        Action::Bin(BinaryOp::Lsh) => "lsh",
+        Action::Bin(BinaryOp::Lsh) | Action::Bin(BinaryOp::Rsh) => "lsh",
         Action::Unary("sqrt") => "sqrt",
         Action::Unary("recip") => "reciprocal",
         Action::Unary("dms") => "dms",
         Action::Unary("sin") => "sin",
         Action::Unary("cos") => "cos",
         Action::Unary("tan") => "tan",
-        Action::Unary("exp") => "exp",
+        Action::Exp => "exp",
         Action::Unary("cube") => "cube",
         Action::Unary("square") => "square",
         Action::Unary("ln") => "ln",
@@ -2726,7 +3095,7 @@ fn scientific_button_defs() -> Vec<ButtonDef> {
         [
             ("Ave", Action::StatsAvg, Tone::Navy),
             ("dms", Action::Unary("dms"), Tone::Magenta),
-            ("Exp", Action::Unary("exp"), Tone::Magenta),
+            ("Exp", Action::Exp, Tone::Magenta),
             ("ln", Action::Unary("ln"), Tone::Magenta),
             ("MR", Action::MemR, Tone::Red),
             ("4", Action::Digit('4'), Tone::Blue),

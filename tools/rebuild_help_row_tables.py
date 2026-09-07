@@ -23,6 +23,35 @@ def padded(text: str) -> str:
     return f"{NBSP}{text}{NBSP}"
 
 
+def pair_payloads(record: h.Record) -> tuple[bytes, bytes]:
+    """Extract the two cell-format payloads from one row-safe table record."""
+    data = record.ld1
+    _size, pos = h.decode_signed_long(data, 0)
+    _length, pos = h.decode_unsigned_short(data, pos)
+    column_count = data[pos]
+    table_type = data[pos + 1]
+    pos += 2
+    if table_type == 0:
+        pos += 2
+    pos += column_count * 4
+    payloads: list[bytes] = []
+    while True:
+        column = h.i16(data, pos)
+        pos += 2
+        if column == -1:
+            break
+        record_type = data[pos]
+        pos += 1
+        payload_size, pos = h.decode_signed_long(data, pos)
+        if record_type > 0x10:
+            _topic_length, pos = h.decode_unsigned_short(data, pos)
+        payloads.append(data[pos : pos + payload_size])
+        pos += payload_size
+    if len(payloads) != 2:
+        raise ValueError(f"row-safe table record has {len(payloads)} cells, expected two")
+    return payloads[0], payloads[1]
+
+
 def build_pair(
     template: h.Record,
     left: str,
@@ -31,8 +60,13 @@ def build_pair(
     widths: tuple[int, int],
     *,
     header: bool,
+    body_template: h.Record | None = None,
 ) -> h.Record:
-    header_left, header_right, key_cell, description_cell = h.parse_table_templates(template)
+    if body_template is None:
+        header_left, header_right, key_cell, description_cell = h.parse_table_templates(template)
+    else:
+        header_left, header_right = pair_payloads(template)
+        key_cell, description_cell = pair_payloads(body_template)
     left_payload, right_payload = (
         (header_left, header_right) if header else (key_cell, description_cell)
     )
@@ -67,10 +101,18 @@ def build_stack(
     rows: list[tuple[str, str]],
     widths: tuple[int, int],
     prefix: str,
+    *,
+    body_template: h.Record | None = None,
 ) -> list[h.Record]:
-    result = [build_pair(template, headers[0], headers[1], f"{prefix}:header", widths, header=True)]
+    result = [build_pair(
+        template, headers[0], headers[1], f"{prefix}:header", widths,
+        header=True, body_template=body_template,
+    )]
     result.extend(
-        build_pair(template, left, right, f"{prefix}:row:{index}", widths, header=False)
+        build_pair(
+            template, left, right, f"{prefix}:row:{index}", widths,
+            header=False, body_template=body_template,
+        )
         for index, (left, right) in enumerate(rows)
     )
     return result
@@ -149,25 +191,15 @@ def rebuild_manual(path: Path) -> dict[str, int]:
     scientific_index = table_after_heading(original_records, cfg["headings"][1])
     control_index = table_after_heading(original_records, cfg["headings"][2])
 
-    # Safe to run repeatedly: a row-safe manual already has a two-cell table
-    # immediately after each target heading, rather than one large multi-cell
-    # independent-column record.
+    # A row-safe manual may already contain one two-cell table record per
+    # visual row.  Do not return early in that case: the canonical row data can
+    # change between builds (for example the recovered F2/F3/F4 shared-selector
+    # shortcuts).  Rebuild the existing row stack while preserving old record
+    # identities wherever the left-hand key/operator still exists.  That keeps
+    # TOPICOFFSET translation stable and makes this generator genuinely
+    # idempotent as documentation content evolves.
     target_indices = (operator_index, basic_index, scientific_index, control_index)
-    if all(cell_count(original_records[index]) == 2 for index in target_indices):
-        crossing = [
-            record.old_pos for record in original_records
-            if record.old_pos is not None
-            and (record.old_pos - h.TOPIC_HEADER_SIZE) % h.TOPIC_DATA_SIZE + h.TOPIC_LINK_HEADER_SIZE > h.TOPIC_DATA_SIZE
-        ]
-        if crossing:
-            raise ValueError(f"{path}: crossing TOPICLINK headers: {crossing}")
-        return {
-            "records": len(original_records),
-            "topics": sum(record.record_type == 0x21 for record in original_records),
-            "blocks": h.internal_file(data, topic_entry.file_offset).used // h.TOPIC_BLOCK_SIZE,
-            "row_tables": sum(record.record_type == 0x23 and cell_count(record) == 2 for record in original_records),
-            "bytes": len(data),
-        }
+    row_safe = all(cell_count(original_records[index]) == 2 for index in target_indices)
 
     specifications = {
         operator_index: (cfg["operator_headers"], content.OPERATOR_ROWS[language], (120, 620), "operators"),
@@ -176,23 +208,65 @@ def rebuild_manual(path: Path) -> dict[str, int]:
         control_index: (cfg["key_headers"], content.CONTROL_ROWS[language], (165, 575), "control"),
     }
 
+    def row_key(record: h.Record) -> str:
+        parts = [part.decode("cp1252", "replace").strip(" \xa0") for part in record.ld2.split(b"\0") if part]
+        return parts[0] if parts else ""
+
+    # For an already row-safe table, discover the contiguous table-record span
+    # beginning at each target header.  The old manuals generated by this tool
+    # place the next section heading immediately after that span.
+    replace_ends: dict[int, int] = {}
+    if row_safe:
+        for start in target_indices:
+            end = start
+            while end < len(original_records):
+                candidate = original_records[end]
+                if candidate.record_type != 0x23 or cell_count(candidate) != 2:
+                    break
+                end += 1
+            replace_ends[start] = end
+    else:
+        replace_ends = {start: start + 1 for start in target_indices}
+
     records: list[h.Record] = []
     generated_ids: list[str] = []
-    for index, record in enumerate(original_records):
+    index = 0
+    while index < len(original_records):
         spec = specifications.get(index)
         if spec is None:
-            records.append(record)
+            records.append(original_records[index])
+            index += 1
             continue
+
+        record = original_records[index]
+        end = replace_ends[index]
+        old_stack = original_records[index:end]
         headers, rows, widths, name = spec
-        stack = build_stack(record, headers, rows, widths, f"new:{language}:{name}")
-        first = stack[0]
-        first.identity = record.identity
-        first.old_index = record.old_index
-        first.old_pos = record.old_pos
-        first.old_size = record.old_size
-        stack[-1].gap_after = record.gap_after
+        stack = build_stack(
+            record,
+            headers,
+            rows,
+            widths,
+            f"new:{language}:{name}",
+            body_template=old_stack[1] if row_safe and len(old_stack) > 1 else None,
+        )
+
+        # Preserve anchor identities/old positions for unchanged row keys.  A
+        # newly introduced row (such as F3 in buildfix144) intentionally has no
+        # old anchor; following rows retain theirs and are translated normally.
+        old_by_key = {row_key(item): item for item in old_stack}
+        for item in stack:
+            previous = old_by_key.get(row_key(item))
+            if previous is None:
+                continue
+            item.identity = previous.identity
+            item.old_index = previous.old_index
+            item.old_pos = previous.old_pos
+            item.old_size = previous.old_size
+        stack[-1].gap_after = old_stack[-1].gap_after
         generated_ids.extend(item.identity for item in stack)
         records.extend(stack)
+        index = end
 
     h.assign_positions(records)
     h.patch_topic_positions(records)

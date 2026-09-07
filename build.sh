@@ -15,6 +15,7 @@ set -euo pipefail
 #   calc.tooltip
 #   Help/*.HLP
 #   Help/*.CNT
+#   shortcuts/default.cfg
 #
 # An existing OpenCalc.cfg is user data and is preserved across rebuilds.
 # Rust-HLP-Viewer is cloned only when its source directory is absent.
@@ -179,8 +180,9 @@ echo "Preparing build-linux..."
 # executable, so clean the packaged output while leaving that one file intact.
 mkdir -p "$BUILD_DIR"
 find "$BUILD_DIR" -mindepth 1 -maxdepth 1 \
-    ! -name 'OpenCalc.cfg' -exec rm -rf -- {} +
+    ! -name 'OpenCalc.cfg' ! -name 'shortcuts' -exec rm -rf -- {} +
 mkdir -p "$BUILD_DIR/Help"
+mkdir -p "$BUILD_DIR/shortcuts"
 
 install -m 0755 "$CARGO_OUTPUT" "$BUILD_DIR/OpenCalc"
 install -m 0755 "$HLP_VIEWER_OUTPUT" "$BUILD_DIR/hlp-viewer"
@@ -200,6 +202,10 @@ copy_required "$SCRIPT_DIR/Help/CALC_ES.HLP" \
     "$BUILD_DIR/Help/CALC_ES.HLP"
 copy_required "$SCRIPT_DIR/Help/CALC_ES.CNT" \
     "$BUILD_DIR/Help/CALC_ES.CNT"
+for preset in "$SCRIPT_DIR"/shortcuts/*.cfg; do
+    [[ -f "$preset" ]] || continue
+    copy_required "$preset" "$BUILD_DIR/shortcuts/${preset##*/}"
+done
 
 require_executable "$BUILD_DIR/OpenCalc"
 require_executable "$BUILD_DIR/hlp-viewer"

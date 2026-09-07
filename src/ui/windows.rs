@@ -6,8 +6,11 @@
 //! matching the reference.  This module keeps the recovered Calculator child
 //! control coordinates but lets wxWidgets own the frame, menu bar and controls.
 
-use crate::shortcuts::{Action, Command, Shortcuts, DEFINITIONS};
-use crate::calc::{Base, BinaryOp, Calculator, Mode};
+use crate::shortcuts::{
+    delete_preset, find_shortcut, load_preset, preset_names, save_preset, Action, Command,
+    Shortcuts, DEFINITIONS,
+};
+use crate::calc::{Base, BinaryOp, Calculator, Mode, WordSize};
 use crate::calculation_log::CalculationLog;
 use crate::expr::AngleMode;
 use crate::history::History;
@@ -29,6 +32,7 @@ use plotters_wxdragon::WxBackend;
 use wxdragon::font::{Font, FontFamily, FontStyle, FontWeight};
 use wxdragon::menus::menuitem::{ItemKind, MenuItem};
 use wxdragon::prelude::*;
+use wxdragon::widgets::combobox::ComboBox;
 use wxdragon::widgets::radio_button::RadioButtonStyle;
 use wxdragon::widgets::splitter_window::{SplitterWindow, SplitterWindowStyle};
 use wxdragon::widgets::static_text::{StaticText, StaticTextStyle};
@@ -232,6 +236,14 @@ struct HistoryEntryRange {
     newest_index: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HelpReturnFocus {
+    Frame,
+    StandardDisplay,
+    ScientificDisplay,
+    GraphExpression,
+}
+
 struct Ui {
     frame: Frame,
     root_surface: Panel,
@@ -263,6 +275,8 @@ struct Ui {
     action_buttons: Vec<(Button, Action)>,
     stats_box: RefCell<Option<StatsBox>>,
     main_was_minimized: Cell<bool>,
+    help_return_focus: Cell<Option<HelpReturnFocus>>,
+    help_return_armed: Cell<bool>,
 }
 
 pub fn run() -> Result<(), String> {
@@ -498,6 +512,8 @@ pub fn run() -> Result<(), String> {
             action_buttons,
             stats_box: RefCell::new(None),
             main_was_minimized: Cell::new(false),
+            help_return_focus: Cell::new(None),
+            help_return_armed: Cell::new(false),
         });
 
         {
@@ -688,6 +704,19 @@ fn refresh_context_help(ui: &Ui) {
             platform::install_context_help(target.hwnd, text, strings.whats_this());
         }
     }
+
+    // The right-hand selector is shared: decimal mode uses angle units, while
+    // Hex/Oct/Bin use the Win95 Dword/Word/Byte display-width selectors.
+    let secondary_keys = if ui.calc.borrow().base == Base::Dec {
+        ["deg", "rad", "grad"]
+    } else {
+        ["dword", "word", "byte"]
+    };
+    for (radio, key) in ui.angle_radios.iter().zip(secondary_keys) {
+        if let Some(text) = ui.tooltips.get(language, key) {
+            platform::install_context_help(radio.get_handle(), text, strings.whats_this());
+        }
+    }
 }
 
 fn action_help_key(action: Action) -> &'static str {
@@ -710,14 +739,14 @@ fn action_help_key(action: Action) -> &'static str {
         Action::Bin(BinaryOp::And) => "and",
         Action::Bin(BinaryOp::Or) => "or",
         Action::Bin(BinaryOp::Xor) => "xor",
-        Action::Bin(BinaryOp::Lsh) => "lsh",
+        Action::Bin(BinaryOp::Lsh) | Action::Bin(BinaryOp::Rsh) => "lsh",
         Action::Unary("sqrt") => "sqrt",
         Action::Unary("recip") => "reciprocal",
         Action::Unary("dms") => "dms",
         Action::Unary("sin") => "sin",
         Action::Unary("cos") => "cos",
         Action::Unary("tan") => "tan",
-        Action::Unary("exp") => "exp",
+        Action::Exp => "exp",
         Action::Unary("cube") => "cube",
         Action::Unary("square") => "square",
         Action::Unary("ln") => "ln",
@@ -1066,10 +1095,9 @@ fn bind_scientific_selectors(ui: &Rc<Ui>) {
         ui.base_radios[index].on_selected(move |_| select_base(&ui_c, index, base));
     }
 
-    let angle_actions = [AngleMode::Degrees, AngleMode::Radians, AngleMode::Grads];
-    for (index, angle) in angle_actions.into_iter().enumerate() {
+    for index in 0..ui.angle_radios.len() {
         let ui_c = Rc::clone(ui);
-        ui.angle_radios[index].on_selected(move |_| select_angle(&ui_c, index, angle));
+        ui.angle_radios[index].on_selected(move |_| select_secondary(&ui_c, index));
     }
 
     {
@@ -1101,7 +1129,7 @@ fn bind_scientific_selectors(ui: &Rc<Ui>) {
 }
 
 /// Apply a selector identified by its index in the notifier table:
-/// 0-3 radix, 4-6 angle, 7 Inv, 8 Hyp.  The checkbox branches copy the
+/// 0-3 radix, 4-6 angle/word-size, 7 Inv, 8 Hyp.  The checkbox branches copy the
 /// control's real BM_GETCHECK state into the model rather than toggling a
 /// cached flag, which keeps the model correct no matter how many times (or how
 /// few) the notification is delivered.
@@ -1120,16 +1148,14 @@ fn install_windows_selector_bridge(ui: &Rc<Ui>) {
 }
 
 fn apply_windows_selector(ui: &Rc<Ui>, index: usize) {
+    if calculator_error_locked(ui) {
+        refresh(ui);
+        return;
+    }
     const BASES: [Base; 4] = [Base::Hex, Base::Dec, Base::Oct, Base::Bin];
-    const ANGLES: [AngleMode; 3] = [
-        AngleMode::Degrees,
-        AngleMode::Radians,
-        AngleMode::Grads,
-    ];
-
     match index {
         0..=3 => select_base(ui, index, BASES[index]),
-        4..=6 => select_angle(ui, index - 4, ANGLES[index - 4]),
+        4..=6 => select_secondary(ui, index - 4),
         7 => {
             let checked = platform::is_button_checked(ui.inv.get_handle());
             mutate_calculator(ui, |calc| calc.inv = checked);
@@ -1145,14 +1171,38 @@ fn apply_windows_selector(ui: &Rc<Ui>, index: usize) {
 }
 
 fn select_base(ui: &Ui, index: usize, base: Base) {
+    if calculator_error_locked(ui) {
+        refresh(ui);
+        return;
+    }
     for (i, radio) in ui.base_radios.iter().enumerate() {
         radio.set_value(i == index);
     }
     mutate_calculator(ui, |calc| calc.set_base(base));
+    refresh_context_help(ui);
     refresh(ui);
 }
 
+fn select_secondary(ui: &Ui, index: usize) {
+    const ANGLES: [AngleMode; 3] = [
+        AngleMode::Degrees,
+        AngleMode::Radians,
+        AngleMode::Grads,
+    ];
+    const WORD_SIZES: [WordSize; 3] = [WordSize::Dword, WordSize::Word, WordSize::Byte];
+
+    if ui.calc.borrow().base == Base::Dec {
+        select_angle(ui, index, ANGLES[index]);
+    } else {
+        select_word_size(ui, index, WORD_SIZES[index]);
+    }
+}
+
 fn select_angle(ui: &Ui, index: usize, angle: AngleMode) {
+    if calculator_error_locked(ui) {
+        refresh(ui);
+        return;
+    }
     for (i, radio) in ui.angle_radios.iter().enumerate() {
         radio.set_value(i == index);
     }
@@ -1160,6 +1210,18 @@ fn select_angle(ui: &Ui, index: usize, angle: AngleMode) {
     // A plotted trigonometric expression follows the same Deg/Rad/Grad mode as
     // the Scientific calculator. Recompile it immediately when the mode changes.
     replot_existing_graph(ui);
+    refresh(ui);
+}
+
+fn select_word_size(ui: &Ui, index: usize, word_size: WordSize) {
+    if calculator_error_locked(ui) {
+        refresh(ui);
+        return;
+    }
+    for (i, radio) in ui.angle_radios.iter().enumerate() {
+        radio.set_value(i == index);
+    }
+    mutate_calculator(ui, |calc| calc.set_word_size(word_size));
     refresh(ui);
 }
 
@@ -1222,66 +1284,205 @@ fn shortcut_record_handler(entry: TextCtrl, status: StaticText, recording: Rc<Ce
     }
 }
 
+fn refresh_windows_preset_combo(combo: ComboBox, preferred: &str) -> Vec<String> {
+    let names = preset_names().unwrap_or_default();
+    combo.clear();
+    for name in &names {
+        combo.append(name);
+    }
+    let next = if names.iter().any(|name| name == preferred) {
+        preferred.to_string()
+    } else if names.iter().any(|name| name == "default") {
+        "default".to_string()
+    } else {
+        names.first().cloned().unwrap_or_default()
+    };
+    combo.set_value(&next);
+    names
+}
+
 fn show_shortcuts(ui: &Rc<Ui>) {
     use wxdragon::dialogs::Dialog;
     use wxdragon::id::ID_CANCEL;
+
     let strings = strings_for(ui);
     let dialog = Dialog::builder(&ui.frame, strings.shortcuts_title()).build();
     dialog.set_font(&classic_font(FontWeight::Normal));
     dialog.set_escape_id(wxdragon::id::ID_NONE);
     dialog.set_affirmative_id(wxdragon::id::ID_NONE);
+
     let layout = BoxSizer::builder(Orientation::Vertical).build();
-    let label = |text: &str| StaticText::builder(&dialog).with_label(text).build();
-    let action_label = label(strings.shortcut_action());
-    let choice = Choice::builder(&dialog).build();
-    for def in DEFINITIONS { choice.append(def.label); }
+    let outer_flags = SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Bottom;
+    let inner_flags = SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Bottom;
+
+    // --- Shortcut assignment section -------------------------------------------------
+    let assignment_heading = StaticText::builder(&dialog)
+        .with_label(strings.shortcut_assignment_section())
+        .build();
+    assignment_heading.set_font(&classic_font(FontWeight::Bold));
+
+    let assignment_panel = Panel::builder(&dialog).build();
+    platform::install_classic_sunken_field_painter(assignment_panel.get_handle());
+    platform::enable_clip_siblings(assignment_panel.get_handle());
+    let assignment_layout = BoxSizer::builder(Orientation::Vertical).build();
+
+    let search_label = StaticText::builder(&assignment_panel)
+        .with_label(strings.shortcut_search())
+        .build();
+    let search = TextCtrl::builder(&assignment_panel).build();
+    search.set_min_size(Size::new(dp(480), -1));
+    platform::install_select_all_shortcut(search.get_handle());
+
+    let action_label = StaticText::builder(&assignment_panel)
+        .with_label(strings.shortcut_action())
+        .build();
+    let choice = Choice::builder(&assignment_panel).build();
+    for def in DEFINITIONS {
+        choice.append(def.label);
+    }
     choice.set_selection(0);
-    let keys_label = label(strings.shortcut_keys());
+
     let draft = Rc::new(RefCell::new(ui.settings.borrow().shortcuts.texts()));
     let selected = Rc::new(Cell::new(0usize));
-    let entry = TextCtrl::builder(&dialog).with_value(&draft.borrow()[0]).build();
+    let capture = Button::builder(&assignment_panel)
+        .with_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[0].label))
+        .build();
+    let shortcut_status = StaticText::builder(&assignment_panel).with_label(" ").build();
+    let keys_label = StaticText::builder(&assignment_panel)
+        .with_label(strings.shortcut_keys())
+        .build();
+    let entry = TextCtrl::builder(&assignment_panel)
+        .with_value(&draft.borrow()[0])
+        .build();
     entry.set_min_size(Size::new(dp(480), -1));
-    let capture = Button::builder(&dialog).with_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[0].label)).build();
+    platform::install_select_all_shortcut(entry.get_handle());
+    let default_label = StaticText::builder(&assignment_panel)
+        .with_label(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[0].defaults))
+        .build();
+    let instructions = StaticText::builder(&assignment_panel)
+        .with_label(strings.shortcut_instructions())
+        .build();
     let recording = Rc::new(Cell::new(false));
-    let status = label(" ");
-    let default_label = label(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[0].defaults));
-    let instructions = label(strings.shortcut_instructions());
+
+    assignment_layout.add_spacer(dp(10));
+    assignment_layout.add(&search_label, 0, inner_flags, dp(10));
+    assignment_layout.add(&search, 0, inner_flags, dp(10));
+    assignment_layout.add(&action_label, 0, inner_flags, dp(10));
+    assignment_layout.add(&choice, 0, inner_flags, dp(10));
+    assignment_layout.add(&capture, 0, inner_flags, dp(10));
+    assignment_layout.add(&shortcut_status, 0, inner_flags, dp(10));
+    assignment_layout.add(&keys_label, 0, inner_flags, dp(10));
+    assignment_layout.add(&entry, 0, inner_flags, dp(10));
+    assignment_layout.add(&default_label, 0, inner_flags, dp(10));
+    assignment_layout.add(&instructions, 0, inner_flags, dp(10));
+    assignment_panel.set_sizer_and_fit(assignment_layout, true);
+
+    // --- Preset section --------------------------------------------------------------
+    let presets_heading = StaticText::builder(&dialog)
+        .with_label(strings.shortcut_presets_section())
+        .build();
+    presets_heading.set_font(&classic_font(FontWeight::Bold));
+
+    let preset_panel = Panel::builder(&dialog).build();
+    platform::install_classic_sunken_field_painter(preset_panel.get_handle());
+    platform::enable_clip_siblings(preset_panel.get_handle());
+    let preset_layout = BoxSizer::builder(Orientation::Vertical).build();
+
+    let preset_label = StaticText::builder(&preset_panel)
+        .with_label(strings.shortcut_preset())
+        .build();
+    let preset_name = ComboBox::builder(&preset_panel).with_value("default").build();
+    preset_name.set_min_size(Size::new(dp(300), -1));
+    refresh_windows_preset_combo(preset_name, "default");
+    // Editable wxComboBox contains an EDIT child; the platform helper also
+    // installs Ctrl+A/Backspace handling on that child.
+    platform::install_select_all_shortcut(preset_name.get_handle());
+
+    let preset_row = BoxSizer::builder(Orientation::Horizontal).build();
+    let load_preset_button = Button::builder(&preset_panel)
+        .with_label(strings.shortcut_load_preset())
+        .build();
+    let save_preset_button = Button::builder(&preset_panel)
+        .with_label(strings.shortcut_save_preset())
+        .build();
+    let delete_preset_button = Button::builder(&preset_panel)
+        .with_label(strings.shortcut_delete_preset())
+        .build();
+    let refresh_presets_button = Button::builder(&preset_panel)
+        .with_label(strings.shortcut_refresh_presets())
+        .build();
+    preset_row.add(&load_preset_button, 0, SizerFlag::Right, dp(8));
+    preset_row.add(&save_preset_button, 0, SizerFlag::Right, dp(8));
+    preset_row.add(&delete_preset_button, 0, SizerFlag::Right, dp(8));
+    preset_row.add(&refresh_presets_button, 0, SizerFlag::AlignLeft, 0);
+
+    let preset_instructions = StaticText::builder(&preset_panel)
+        .with_label(strings.shortcut_preset_instructions())
+        .build();
+    let preset_status = StaticText::builder(&preset_panel).with_label(" ").build();
+
+    preset_layout.add_spacer(dp(10));
+    preset_layout.add(&preset_label, 0, inner_flags, dp(10));
+    preset_layout.add(&preset_name, 0, inner_flags, dp(10));
+    preset_layout.add_sizer(&preset_row, 0, inner_flags, dp(10));
+    preset_layout.add(&preset_instructions, 0, inner_flags, dp(10));
+    preset_layout.add(&preset_status, 0, inner_flags, dp(10));
+    preset_panel.set_sizer_and_fit(preset_layout, true);
+
+    // --- Footer ----------------------------------------------------------------------
     let row = BoxSizer::builder(Orientation::Horizontal).build();
     let reset = Button::builder(&dialog).with_label(strings.restore_defaults()).build();
     let save = Button::builder(&dialog).with_label(strings.save()).build();
     let cancel = Button::builder(&dialog).with_label(strings.cancel()).build();
-    let flags = SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Bottom;
-    layout.add_spacer(dp(12));
-    layout.add(&action_label, 0, flags, dp(12));
-    layout.add(&choice, 0, flags, dp(12));
-    layout.add(&capture, 0, flags, dp(12));
-    layout.add(&status, 0, flags, dp(12));
-    layout.add(&keys_label, 0, flags, dp(12));
-    layout.add(&entry, 0, flags, dp(12));
-    layout.add(&default_label, 0, flags, dp(12));
-    layout.add(&instructions, 0, flags, dp(12));
     row.add(&reset, 0, SizerFlag::Right, dp(12));
     row.add_stretch_spacer(1);
     row.add(&save, 0, SizerFlag::Right, dp(12));
     row.add(&cancel, 0, SizerFlag::AlignLeft, 0);
-    layout.add_sizer(&row, 0, flags, dp(12));
+
+    layout.add_spacer(dp(12));
+    layout.add(&assignment_heading, 0, outer_flags, dp(12));
+    layout.add(&assignment_panel, 0, outer_flags, dp(12));
+    layout.add(&presets_heading, 0, outer_flags, dp(12));
+    layout.add(&preset_panel, 0, outer_flags, dp(12));
+    layout.add_sizer(&row, 0, outer_flags, dp(12));
     dialog.set_sizer_and_fit(layout, true);
-    dialog.on_key_down(shortcut_record_handler(entry, status, Rc::clone(&recording), true, strings));
-    dialog.on_char(shortcut_record_handler(entry, status, Rc::clone(&recording), false, strings));
-    capture.on_key_down(shortcut_record_handler(entry, status, Rc::clone(&recording), true, strings));
-    capture.on_char(shortcut_record_handler(entry, status, Rc::clone(&recording), false, strings));
+
+    dialog.on_key_down(shortcut_record_handler(entry, shortcut_status, Rc::clone(&recording), true, strings));
+    dialog.on_char(shortcut_record_handler(entry, shortcut_status, Rc::clone(&recording), false, strings));
+    capture.on_key_down(shortcut_record_handler(entry, shortcut_status, Rc::clone(&recording), true, strings));
+    capture.on_char(shortcut_record_handler(entry, shortcut_status, Rc::clone(&recording), false, strings));
     {
         let recording = Rc::clone(&recording);
         capture.on_click(move |_| {
             recording.set(true);
-            status.set_label(strings.shortcut_listening());
+            shortcut_status.set_label(strings.shortcut_listening());
             capture.set_focus();
         });
     }
     {
         let draft = Rc::clone(&draft);
         let selected = Rc::clone(&selected);
-        entry.on_text_updated(move |_| { draft.borrow_mut()[selected.get()] = entry.get_value(); });
+        entry.on_text_updated(move |_| {
+            draft.borrow_mut()[selected.get()] = entry.get_value();
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        let selected = Rc::clone(&selected);
+        search.on_text_updated(move |_| {
+            let query = search.get_value();
+            let index = {
+                let draft_ref = draft.borrow();
+                find_shortcut(&query, &draft_ref)
+            };
+            let Some(index) = index else { return; };
+            let value = draft.borrow()[index].clone();
+            selected.set(index);
+            choice.set_selection(index as u32);
+            capture.set_label(&format!("{} {}", strings.press_key_for(), DEFINITIONS[index].label));
+            entry.set_value(&value);
+            default_label.set_label(&format!("{}: {}", strings.shortcut_default(), DEFINITIONS[index].defaults));
+        });
     }
     {
         let draft = Rc::clone(&draft);
@@ -1303,14 +1504,80 @@ fn show_shortcuts(ui: &Rc<Ui>) {
             *draft.borrow_mut() = Shortcuts::default().texts();
             let value = draft.borrow()[selected.get()].clone();
             entry.set_value(&value);
+            shortcut_status.set_label("Defaults restored in this dialog. Save to apply them.");
         });
     }
+    {
+        let draft = Rc::clone(&draft);
+        let selected = Rc::clone(&selected);
+        load_preset_button.on_click(move |_| {
+            let name = preset_name.get_value();
+            match load_preset(&name) {
+                Ok(shortcuts) => {
+                    *draft.borrow_mut() = shortcuts.texts();
+                    let index = selected.get();
+                    let value = draft.borrow()[index].clone();
+                    entry.set_value(&value);
+                    preset_status.set_label("Preset loaded. Save to apply it to OpenCalc.");
+                }
+                Err(error) => platform::message(strings.shortcuts_title(), &error),
+            }
+        });
+    }
+    {
+        let draft = Rc::clone(&draft);
+        save_preset_button.on_click(move |_| {
+            let shortcuts = match Shortcuts::from_texts(&draft.borrow()) {
+                Ok(shortcuts) => shortcuts,
+                Err(error) => {
+                    platform::message(strings.shortcuts_title(), &error);
+                    return;
+                }
+            };
+            let name = preset_name.get_value();
+            match save_preset(&name, &shortcuts) {
+                Ok(path) => {
+                    refresh_windows_preset_combo(preset_name, &name);
+                    preset_status.set_label(&format!("Preset saved: {}", path.display()));
+                    dialog.layout();
+                }
+                Err(error) => platform::message(strings.shortcuts_title(), &error),
+            }
+        });
+    }
+    delete_preset_button.on_click(move |_| {
+        let name = preset_name.get_value();
+        if name.trim().is_empty() {
+            platform::message(strings.shortcuts_title(), "Choose a preset to delete.");
+            return;
+        }
+        if !platform::confirm(dialog.get_handle(), strings.shortcuts_title(), &strings.shortcut_delete_confirmation(&name)) {
+            return;
+        }
+        match delete_preset(&name) {
+            Ok(()) => {
+                refresh_windows_preset_combo(preset_name, "");
+                preset_status.set_label("Preset deleted.");
+                dialog.layout();
+            }
+            Err(error) => platform::message(strings.shortcuts_title(), &error),
+        }
+    });
+    refresh_presets_button.on_click(move |_| {
+        let current = preset_name.get_value();
+        refresh_windows_preset_combo(preset_name, &current);
+        preset_status.set_label("Preset list refreshed.");
+        dialog.layout();
+    });
     {
         let ui = Rc::clone(ui);
         save.on_click(move |_| {
             let shortcuts = match Shortcuts::from_texts(&draft.borrow()) {
                 Ok(shortcuts) => shortcuts,
-                Err(error) => { platform::message(strings.shortcuts_title(), &error); return; }
+                Err(error) => {
+                    platform::message(strings.shortcuts_title(), &error);
+                    return;
+                }
             };
             let mut settings = ui.settings.borrow_mut();
             let previous = std::mem::replace(&mut settings.shortcuts, shortcuts);
@@ -1325,7 +1592,7 @@ fn show_shortcuts(ui: &Rc<Ui>) {
     }
     cancel.on_click(move |_| dialog.end_modal(ID_CANCEL));
     dialog.centre();
-    entry.set_focus();
+    search.set_focus();
     dialog.show_modal();
     dialog.destroy();
     ui.frame.set_focus();
@@ -1355,6 +1622,7 @@ fn binary_history_symbol(op: BinaryOp) -> &'static str {
         BinaryOp::Or => "or",
         BinaryOp::Xor => "xor",
         BinaryOp::Lsh => "lsh",
+        BinaryOp::Rsh => "rsh",
     }
 }
 
@@ -1558,10 +1826,6 @@ fn bind_history_text_recall(ui: &Rc<Ui>, text: TextCtrl) {
                 }
             }
         }
-        // This read-only field is a recall surface, not a keyboard input
-        // context. Native EDIT focus can still land here after returning from
-        // the external HLP viewer even though wx marks it non-focusable.
-        ui_c.frame.set_focus();
         // Consume the click: History behaves like a recall surface, not like a
         // selectable/editable text field with a caret.
         event.skip(false);
@@ -1922,8 +2186,31 @@ fn keyboard_handler(ui: Rc<Ui>, display: bool) -> impl Fn(WindowEventData) {
     }
 }
 
+fn calculator_error_locked(ui: &Ui) -> bool {
+    if ui.calc.borrow().error.is_some() {
+        platform::invalid_input_beep();
+        true
+    } else {
+        false
+    }
+}
+
 fn perform_shortcut(ui: &Rc<Ui>, command: Command) -> bool {
     let mode = ui.calc.borrow().mode;
+    // CALC.EXE routes F2-F8 selector accelerators through Decimal while the
+    // Standard layout is active. They must not mutate hidden Scientific angle,
+    // radix, or word-size state. OpenCalc normally enters Standard already in
+    // Decimal; the fallback assignment only repairs an inconsistent old state.
+    if mode == Mode::Standard
+        && matches!(command, Command::Base(_) | Command::Angle(_) | Command::Word | Command::F6)
+    {
+        if calculator_error_locked(ui) { return true; }
+        if ui.calc.borrow().base != Base::Dec {
+            mutate_calculator(ui, |calc| calc.set_base(Base::Dec));
+        }
+        refresh(ui);
+        return true;
+    }
     match command {
         Command::Button(action) => perform_from_keyboard(ui, action),
         Command::Percent => perform_from_keyboard(ui, if mode == Mode::Scientific { Action::Bin(BinaryOp::Mod) } else { Action::Percent }),
@@ -1931,17 +2218,35 @@ fn perform_shortcut(ui: &Rc<Ui>, command: Command) -> bool {
         Command::Undo => undo(ui),
         Command::Redo => redo(ui),
         Command::Inv | Command::Hyp => {
+            if calculator_error_locked(ui) { return true; }
             mutate_calculator(ui, |calc| if command == Command::Inv { calc.inv = !calc.inv; } else { calc.hyp = !calc.hyp; });
             refresh(ui);
         }
         Command::Base(base) => select_base(ui, match base { Base::Hex => 0, Base::Dec => 1, Base::Oct => 2, Base::Bin => 3 }, base),
         Command::Angle(angle) => {
-            if ui.calc.borrow().base != Base::Dec { return false; }
-            select_angle(ui, match angle { AngleMode::Degrees => 0, AngleMode::Radians => 1, AngleMode::Grads => 2 }, angle);
+            if ui.calc.borrow().base == Base::Dec {
+                select_angle(ui, match angle { AngleMode::Degrees => 0, AngleMode::Radians => 1, AngleMode::Grads => 2 }, angle);
+            } else {
+                match angle {
+                    AngleMode::Degrees => select_word_size(ui, 0, WordSize::Dword),
+                    AngleMode::Grads => select_word_size(ui, 2, WordSize::Byte),
+                    AngleMode::Radians => return false,
+                }
+            }
+        }
+        Command::Word => {
+            // F3 targets the *middle* shared selector in CALC.EXE: Rad while
+            // decimal is active, Word while Hex/Oct/Bin is active.
+            if ui.calc.borrow().base == Base::Dec {
+                select_angle(ui, 1, AngleMode::Radians);
+            } else {
+                select_word_size(ui, 1, WordSize::Word);
+            }
         }
         Command::F6 => {
-            if ui.calc.borrow().base == Base::Dec { select_angle(ui, 1, AngleMode::Radians); }
-            else { select_base(ui, 1, Base::Dec); }
+            // The original accelerator table maps F6 to command 0x7B (Dec)
+            // unconditionally.  Rad is the shared selector's F3 command.
+            select_base(ui, 1, Base::Dec);
         }
     }
     true
@@ -1949,6 +2254,16 @@ fn perform_shortcut(ui: &Rc<Ui>, command: Command) -> bool {
 
 
 fn perform(ui: &Rc<Ui>, action: Action) {
+    // CALC.EXE locks calculator commands after an error. C and CE are the two
+    // recovery commands; non-calculator UI commands such as Copy/Help/About
+    // remain usable.
+    if ui.calc.borrow().error.is_some()
+        && !matches!(action, Action::C | Action::CE | Action::Copy | Action::Help | Action::About)
+    {
+        platform::invalid_input_beep();
+        return;
+    }
+
     match action {
         Action::Copy => {
             let strings = strings_for(ui);
@@ -1993,7 +2308,27 @@ fn perform(ui: &Rc<Ui>, action: Action) {
         }
         Action::Help => {
             let language = ui.settings.borrow().language;
+            // hlp-viewer.exe is a separate top-level application.  Opening it
+            // temporarily deactivates OpenCalc and Windows can leave the
+            // calculator with no useful keyboard sink when the user returns.
+            // Remember the legitimate native editing context, if any, and arm
+            // restoration only after we observe OpenCalc actually deactivate.
+            let return_focus = if platform::has_keyboard_focus(
+                ui.graph_panel.expression.get_handle(),
+            ) {
+                HelpReturnFocus::GraphExpression
+            } else if platform::has_keyboard_focus(ui.standard_display.get_handle()) {
+                HelpReturnFocus::StandardDisplay
+            } else if platform::has_keyboard_focus(ui.scientific_display.get_handle()) {
+                HelpReturnFocus::ScientificDisplay
+            } else {
+                HelpReturnFocus::Frame
+            };
+            ui.help_return_focus.set(Some(return_focus));
+            ui.help_return_armed.set(false);
             if let Err(error) = platform::launch_help(language) {
+                ui.help_return_focus.set(None);
+                ui.help_return_armed.set(false);
                 let strings = strings_for(ui);
                 let localized = strings.runtime_message(&error).unwrap_or(error.as_str());
                 show_modal_message(&ui.frame, strings.help_title(), localized);
@@ -2005,6 +2340,24 @@ fn perform(ui: &Rc<Ui>, action: Action) {
             return;
         }
         _ => {}
+    }
+
+    let rejected_input = {
+        let calc = ui.calc.borrow();
+        match action {
+            Action::Digit(ch) => !calc.can_accept_digit(ch),
+            Action::Dot => !calc.can_accept_decimal_point(),
+            Action::Back => !calc.can_backspace(),
+            Action::Sign => !calc.can_toggle_sign(),
+            Action::Pi => !calc.can_use_pi(),
+            Action::Exp => !calc.can_start_exponent_entry(),
+            Action::Close => !calc.can_close_paren(),
+            _ => false,
+        }
+    };
+    if rejected_input {
+        platform::invalid_input_beep();
+        return;
     }
 
     let history_expression = {
@@ -2025,11 +2378,12 @@ fn perform(ui: &Rc<Ui>, action: Action) {
             Action::Bin(op) => calc.binary(op),
             Action::KeyboardStar => calc.keyboard_star(),
             Action::Unary(name) => calc.unary(name),
+            Action::Exp => { calc.exponent_entry(); },
             Action::MemC => calc.memory_clear(),
             Action::MemR => calc.memory_recall(),
             Action::MemS => calc.memory_store(),
             Action::MemAdd => calc.memory_add(),
-            Action::Pi => calc.set_value(std::f64::consts::PI),
+            Action::Pi => { calc.pi(); },
             Action::Open => calc.open_paren(),
             Action::Close => calc.close_paren(),
             Action::StatsDat => calc.stat_dat(),
@@ -2047,6 +2401,13 @@ fn perform(ui: &Rc<Ui>, action: Action) {
 }
 
 fn set_mode(ui: &Rc<Ui>, mode: Mode) {
+    if mode == Mode::Standard {
+        let existing = { ui.stats_box.borrow_mut().take() };
+        if let Some(stats) = existing {
+            platform::set_companion_application_active(stats.frame.get_handle(), false);
+            stats.frame.destroy();
+        }
+    }
     if ui.calc.borrow().mode != mode {
         mutate_calculator(ui, |calc| calc.set_mode(mode));
     }
@@ -2590,6 +2951,15 @@ fn restore_open_companions(ui: &Rc<Ui>) {
     show_open_stats_box(ui);
 }
 
+fn restore_help_return_focus(ui: &Ui, target: HelpReturnFocus) {
+    match target {
+        HelpReturnFocus::Frame => ui.frame.set_focus(),
+        HelpReturnFocus::StandardDisplay => ui.standard_display.set_focus(),
+        HelpReturnFocus::ScientificDisplay => ui.scientific_display.set_focus(),
+        HelpReturnFocus::GraphExpression => ui.graph_panel.expression.set_focus(),
+    }
+}
+
 fn bind_companion_tracking(ui: &Rc<Ui>) {
     // An already-open Statistics Box keeps its screen position. Calculator move,
     // resize, mode, History-width and activation events must not recenter it.
@@ -2598,6 +2968,18 @@ fn bind_companion_tracking(ui: &Rc<Ui>) {
         let ui_c = Rc::clone(ui);
         ui.frame.on_activate(move |event: WindowEventData| {
             if let WindowEventData::Activate(activation) = &event {
+                if activation.is_active() {
+                    if ui_c.help_return_armed.replace(false) {
+                        if let Some(target) = ui_c.help_return_focus.take() {
+                            restore_help_return_focus(&ui_c, target);
+                        }
+                    }
+                } else if ui_c.help_return_focus.get().is_some() {
+                    // Do not consume the pending restoration until the Help
+                    // viewer (or another foreground window reached from it)
+                    // has genuinely deactivated the Calculator at least once.
+                    ui_c.help_return_armed.set(true);
+                }
                 // Treat Calculator + Statistics as one active window group.
                 // This updates Statistics' active appearance/z-order without
                 // moving it or stealing real keyboard focus.
@@ -2765,13 +3147,28 @@ fn refresh(ui: &Ui) {
         radio.set_value(i == base_index);
     }
 
-    let angle_index = match calc.angle {
-        AngleMode::Degrees => 0,
-        AngleMode::Radians => 1,
-        AngleMode::Grads => 2,
+    let (secondary_labels, secondary_index) = if calc.base == Base::Dec {
+        (
+            ["Deg", "Rad", "Grad"],
+            match calc.angle {
+                AngleMode::Degrees => 0,
+                AngleMode::Radians => 1,
+                AngleMode::Grads => 2,
+            },
+        )
+    } else {
+        (
+            ["Dword", "Word", "Byte"],
+            match calc.word_size {
+                WordSize::Dword => 0,
+                WordSize::Word => 1,
+                WordSize::Byte => 2,
+            },
+        )
     };
     for (i, radio) in ui.angle_radios.iter().enumerate() {
-        radio.set_value(i == angle_index);
+        radio.set_label(secondary_labels[i]);
+        radio.set_value(i == secondary_index);
     }
 
     refresh_stats(ui);
@@ -2860,7 +3257,7 @@ fn scientific_button_defs() -> Vec<ButtonDef> {
         [
             ("Ave", Action::StatsAvg, Tone::Navy),
             ("dms", Action::Unary("dms"), Tone::Magenta),
-            ("Exp", Action::Unary("exp"), Tone::Magenta),
+            ("Exp", Action::Exp, Tone::Magenta),
             ("ln", Action::Unary("ln"), Tone::Magenta),
             ("MR", Action::MemR, Tone::Red),
             ("4", Action::Digit('4'), Tone::Blue),

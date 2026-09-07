@@ -445,6 +445,9 @@ impl Parser<'_> {
                         Tok::Ident(s) if s == "xor" => (0, 1, 'x'),
                         Tok::Ident(s) if s == "or" => (0, 1, '|'),
                         Tok::Ident(s) if s == "lsh" => (5, 6, '<'),
+                        // Internal spelling used when Inv+Lsh has been
+                        // resolved to the reference executable's SAR opcode.
+                        Tok::Ident(s) if s == "rsh" => (5, 6, '>'),
                         _ => break,
                     };
                     if l_bp < min_bp { break; }
@@ -509,17 +512,21 @@ fn apply_binary(op: char, a: f64, b: f64) -> Result<f64, String> {
             if b == 0.0 { return Err(DIVIDE_BY_ZERO.into()); }
             checked_finite(a % b)
         }
-        '&' | '|' | 'x' | '<' => {
+        '&' | '|' | 'x' | '<' | '>' => {
             if a.abs() > u32::MAX as f64 || b.abs() > u32::MAX as f64 {
                 return Err(RESULT_TOO_LARGE.into());
             }
-            Ok(match op {
-                '&' => ((a as i64) & (b as i64)) as f64,
-                '|' => ((a as i64) | (b as i64)) as f64,
-                'x' => ((a as i64) ^ (b as i64)) as f64,
-                '<' => ((a as i64).wrapping_shl((b as u32) & 63)) as f64,
+            let lhs = (a.trunc() as i64) as u32;
+            let rhs = (b.trunc() as i64) as u32;
+            let value = match op {
+                '&' => lhs & rhs,
+                '|' => lhs | rhs,
+                'x' => lhs ^ rhs,
+                '<' => lhs.wrapping_shl(rhs & 31),
+                '>' => ((lhs as i32) >> (rhs & 31)) as u32,
                 _ => unreachable!(),
-            })
+            };
+            Ok((value as i32) as f64)
         }
         _ => Err("Unknown operator.".into()),
     }
@@ -587,20 +594,53 @@ fn from_radians(x: f64, mode: AngleMode) -> f64 {
     }
 }
 
+
+fn classic_tangent_zero_input(x: f64, mode: AngleMode) -> bool {
+    let magnitude = x.abs();
+    match mode {
+        // Recovered exact compares at 0x40470F..0x404747.
+        AngleMode::Degrees => [180.0, 360.0, 540.0, 720.0].contains(&magnitude),
+        // Recovered exact compares at 0x40475D..0x404795.
+        AngleMode::Radians => {
+            let pi = std::f64::consts::PI;
+            magnitude == pi || magnitude == 2.0 * pi || magnitude == 3.0 * pi || magnitude == 4.0 * pi
+        }
+        // The original has no equivalent exact-compare branch for Grads.
+        AngleMode::Grads => false,
+    }
+}
+
 fn apply_function(name: &str, x: f64, ctx: EvalContext) -> Result<f64, String> {
     let v = match name {
         "sqrt" => {
             if x < 0.0 { return Err(FUNCTION_UNDEFINED.into()); }
             x.sqrt()
         }
-        "sin" => to_radians(x, ctx.angle).sin(),
-        "cos" => to_radians(x, ctx.angle).cos(),
+        "sin" => {
+            let value = to_radians(x, ctx.angle).sin();
+            // CALC.EXE clamps tiny FSIN residue to exactly zero after the
+            // operation (constant 1e-15 at 0x40A518).  This is why canonical
+            // values such as sin(180 deg) display 0 instead of ~1.2e-16.
+            if value.abs() < 1.0e-15 { 0.0 } else { value }
+        }
+        "cos" => {
+            let value = to_radians(x, ctx.angle).cos();
+            // FCOS uses the same post-operation 1e-15 zero clamp.
+            if value.abs() < 1.0e-15 { 0.0 } else { value }
+        }
         "tan" => {
-            let value = to_radians(x, ctx.angle).tan();
-            // CALC.EXE explicitly treats the huge tangent produced at an
-            // asymptote as an undefined function result (threshold 1e15).
-            if value.abs() > 1.0e15 { return Err(FUNCTION_UNDEFINED.into()); }
-            value
+            // Unlike sin/cos, CALC.EXE does not apply a general tiny-value
+            // clamp after FPTAN.  It does, however, special-case the exact
+            // degree/radian multiples below before executing FPTAN.
+            if classic_tangent_zero_input(x, ctx.angle) {
+                0.0
+            } else {
+                let value = to_radians(x, ctx.angle).tan();
+                // The reference explicitly treats the huge tangent produced
+                // at an asymptote as undefined (threshold 1e15).
+                if value.abs() > 1.0e15 { return Err(FUNCTION_UNDEFINED.into()); }
+                value
+            }
         }
         "asin" => {
             if !(-1.0..=1.0).contains(&x) { return Err(INVALID_FUNCTION_INPUT.into()); }
@@ -633,7 +673,8 @@ fn apply_function(name: &str, x: f64, ctx: EvalContext) -> Result<f64, String> {
         }
         "exp" => return checked_exp(x.exp()),
         "abs" => x.abs(),
-        "int" | "floor" => x.floor(),
+        "int" => x.trunc(),
+        "floor" => x.floor(),
         "ceil" => x.ceil(),
         "fact" | "factorial" => factorial(x)?,
         _ => return Err(format!("Unknown function '{name}'.")),
@@ -696,6 +737,13 @@ mod tests {
         assert!((e("tan(45)") - 1.0).abs() < 1.0e-12);
     }
     #[test]
+    fn int_truncates_toward_zero_while_floor_remains_available() {
+        assert_eq!(e("int(-1.5)"), -1.0);
+        assert_eq!(e("int(1.5)"), 1.0);
+        assert_eq!(e("floor(-1.5)"), -2.0);
+        assert_eq!(e("floor(1.5)"), 1.0);
+    }
+    #[test]
     fn pasted_factorial_supports_postfix_and_named_forms() {
         assert_eq!(e("0!"), 1.0);
         assert_eq!(e("5!"), 120.0);
@@ -753,6 +801,23 @@ mod tests {
             FUNCTION_UNDEFINED
         );
     }
+
+    #[test]
+    fn classic_direct_trig_zeroes_do_not_leak_floating_point_residue() {
+        let degrees = EvalContext::default();
+        assert_eq!(eval_expression("sin(180)", degrees).unwrap(), 0.0);
+        assert_eq!(eval_expression("cos(90)", degrees).unwrap(), 0.0);
+        assert_eq!(eval_expression("tan(180)", degrees).unwrap(), 0.0);
+
+        let radians = EvalContext { angle: AngleMode::Radians, ..EvalContext::default() };
+        assert_eq!(eval_expression("sin(pi)", radians).unwrap(), 0.0);
+        assert_eq!(eval_expression("cos(pi/2)", radians).unwrap(), 0.0);
+        assert_eq!(eval_expression("tan(pi)", radians).unwrap(), 0.0);
+
+        let grads = EvalContext { angle: AngleMode::Grads, ..EvalContext::default() };
+        assert_eq!(eval_expression("sin(200)", grads).unwrap(), 0.0);
+        assert_eq!(eval_expression("cos(100)", grads).unwrap(), 0.0);
+    }
     #[test]
     fn inverse_power_internal_operator_matches_classic_error_path() {
         let ctx = EvalContext::default();
@@ -770,6 +835,15 @@ mod tests {
         assert_eq!(compiled.evaluate_at(3.0).unwrap(), 5.0);
         assert_eq!(eval_expression("x+1", EvalContext::default()).unwrap_err(),
             "Expected a number, unary sign, function, or '(', got Star.");
+    }
+
+    #[test]
+    fn bitwise_expression_results_use_signed_dword_semantics() {
+        assert_eq!(e("0x80000000 or 0"), i32::MIN as f64);
+        assert_eq!(e("0xffffffff xor 1"), -2.0);
+        assert_eq!(e("1 lsh 32"), 1.0);
+        assert_eq!(e("0x80000000 rsh 1"), -1_073_741_824.0);
+        assert_eq!(e("1 rsh 32"), 1.0);
     }
 
 }

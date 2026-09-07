@@ -42,3 +42,136 @@ Buildfix135 Windows graph Function Ctrl+A
 - Ctrl+A sends EM_SETSEL(0, -1) to the focused Function edit control and does not invoke the Scientific Statistics Average accelerator.
 - No Linux, calculator-state, layout, parser, settings, help, or build behavior was changed.
 
+
+
+Buildfix139 Windows Help-return KEY_DOWN shortcut recovery
+- A scoped Windows native subclass records KEY_DOWN virtual-key/scan-code data and translates printable shortcuts with ToUnicodeEx without altering dead-key state.
+- Enter/Escape request dialog-key delivery so a focused native calculator button cannot consume them before shortcut dispatch.
+- Display selection and graph editing remain native.
+- This source state was reconstructed from the validated buildfix139 Windows package behavior and retained in buildfix140.
+
+Buildfix140 classic non-decimal selectors and radix arithmetic
+- Decimal mode uses Deg/Rad/Grad; Hex, Oct and Bin use Dword/Word/Byte in the same right-hand selector group on both Windows and Linux.
+- F2/F3/F4 select Dword/Word/Byte in non-decimal modes and Deg/Rad/Grad in decimal mode; F6 selects Dec.
+- Dword/Word/Byte render low 32/16/8-bit views without discarding the calculator's full current value.
+- Scientific button expressions qualify non-decimal operands before expression evaluation; Oct 777+77 therefore produces 1076 instead of 1526.
+- Pasted bare integer expressions follow the selected non-decimal radix, while explicit 0x/0o/0b literals are preserved.
+- History strips internal radix prefixes so it remains in the classic visible notation.
+- Added regression tests for octal button arithmetic, octal paste, hexadecimal Scientific arithmetic, and Dword/Word/Byte view semantics.
+- PASS: Rust lexical delimiter scan accepted all 20 source files.
+- PASS: platform-separation checks passed.
+- PASS: git diff --check reported no whitespace errors.
+- Cargo compilation and live GUI tests were unavailable because the Rust/native GUI toolchain is not installed in this environment.
+
+Buildfix141 Hex/Bin radix parity
+- Hex Scientific button arithmetic is explicitly regression-tested with digit-only operands: 777+77 -> 7EE.
+- Hex A-F input is explicitly regression-tested: FF+1 -> 100.
+- Hex pasted expressions are explicitly regression-tested under the selected base.
+- Bin Scientific button arithmetic is explicitly regression-tested: 111+11 -> 1010.
+- Bin pasted expressions are explicitly regression-tested under the selected base.
+- Hex and Bin retain Dword/Word/Byte through the same non-decimal UI branch as Oct.
+
+Buildfix142 Windows platform facade compile fix
+- Re-exported install_click_activation_focus_recovery from platform::imp on Windows.
+- Re-exported install_keydown_translation from platform::imp on Windows.
+- Re-exported keydown_character from platform::imp on Windows.
+- These are the three symbols referenced by src/ui/windows.rs and already implemented in src/platform/windows.rs.
+- Python helper scripts compile with py_compile.
+- Rust lexical delimiter scan and platform-separation checks pass.
+- Cargo/native Windows compilation is unavailable in this container.
+- Static facade check found 38 platform:: references in the Windows UI and zero names missing from src/platform/mod.rs.
+
+Buildfix143 exact Dword/Word/Byte behavior
+- Re-audited the supplied Windows 95 CALC.EXE selector, display, digit-entry,
+  unary-NOT and DWORD binary-operation paths.
+- Dword/Word/Byte now use recovered masks FFFFFFFF/FFFF/FF in Hex, Oct and Bin.
+- The full DWORD-range numeric value is retained behind Word/Byte displays, so
+  changing width restores hidden upper bits exactly as the reference does.
+- Non-decimal direct entry, Backspace and +/- use the retained full value.
+- Full magnitude is rejected above 0xFFFFFFFF before the selected display mask.
+- And/Or/Xor/Not/Lsh use signed-result 32-bit DWORD semantics; Lsh masks the
+  count to 5 bits as the recovered x86 SHL does.
+- Added regression coverage for direct masked entry, width changes, Byte masks
+  in Hex/Oct/Bin, Word and Byte arithmetic in all three radices, DWORD overflow,
+  two's-complement negative displays, DWORD bitwise semantics and hidden-value
+  Backspace behavior.
+
+Buildfix144 final selector/radix audit
+- PASS: supplied CALC.EXE SHA-256 is b064b0ac430264eff7b79b91e743bcd36d7b3707857f5bcdc4db146911dd0e28.
+- PASS: decoded non-decimal DWORD limit constants at 0x0040A4B0, 0x0040A4D0 and 0x0040A600 are 4294967295.0.
+- PASS: recovered accelerator resource maps F2/F3/F4 to shared selector IDs 0x7F/0x80/0x81 and F5/F6/F7/F8 to Hex/Dec/Oct/Bin.
+- PASS: Inv+Lsh dispatch and signed x86 SAR implementation were rechecked at 0x00402DD7..0x00402DFA and 0x00404D8A..0x00404DA9.
+- PASS: non-decimal display path floors and stores the value before the DWORD range check and Dword/Word/Byte display mask.
+- Rust delimiter, platform-separation, helper-script syntax, source-manifest and ZIP integrity checks are rerun for the packaged source below.
+- Cargo/native GUI execution remains unavailable in this container.
+
+Buildfix145 Win95 radix/PI/Exp completion
+- PASS: radix selection commits Base before non-decimal DWORD conversion failure; clearing preserves the selected radix.
+- PASS: Standard mode forces Decimal before clearing state.
+- PASS: Windows invalid-input feedback uses MessageBeep(MB_OK); rejected radix digits and non-decimal decimal-point input do not mutate calculator history.
+- PASS: PI is Decimal-only; Inv+PI produces 2*pi and consumes Inv while Scientific expression history preserves the constant token.
+- PASS: Exp is a dedicated exponent-entry action, with 1.e+000 only for an empty clear buffer, completed-result entry, exponent sign/Backspace behavior, unlimited leading-zero keystrokes and a 289 magnitude ceiling for either sign.
+- PASS: CALC_EN.HLP, CALC_PT-BR.HLP and CALC_ES.HLP no longer describe Exp as e^x; the HLP update tool is idempotent.
+- PASS: Python helper scripts compile, Rust lexical delimiter scan passes, and platform-separation checks pass.
+- Cargo/native Windows compilation and a live GUI run remain unavailable because the Rust/wxDragon toolchain is not installed in this environment.
+
+Buildfix146 calculation-state completion with intentional modern extensions
+- PASS (static): classic calculator paths keep error state locked until C/CE; direct digit, decimal, memory, statistics, PI/Exp, F-E and arithmetic paths do not clear errors implicitly.
+- PASS (static): Windows/Linux calculator-action dispatch beeps and rejects blocked error-state commands while Copy/Help/About remain application UI operations; modern Undo/history recall remain intentional extensions.
+- PASS (static): Standard repeated '=' stores and reuses the previous binary operator and right-hand operand; History can render the repeated operation.
+- PASS (static): Standard/Scientific mode switches preserve the current numeric value; Standard still forces Decimal.
+- PASS (static): switching to Standard destroys/closes an open Statistics companion without clearing its dataset.
+- PASS (static): Scientific consecutive binary operators replace the pending operator, including textual Mod/And/Or/Xor/Lsh/Rsh/root operators.
+- PASS (static): unmatched ')' is rejected by the UI invalid-input path.
+- INTENTIONAL EXTENSION: no 25-level parenthesis cap; a 100-level nesting regression test is included.
+- INTENTIONAL EXTENSION: no legacy 13-digit Decimal mantissa-entry cap; entry text remains dynamically sized.
+- INTENTIONAL EXTENSION: the real expression Paste parser and '**' power shortcut remain unchanged.
+- Cargo/native GUI execution remains unavailable because the Rust/wxDragon toolchain is not installed in this environment.
+
+Buildfix147 memory/unary/display completion with modern limits retained
+- PASS (static): MC/MR/MS/M+ use a separate replace-on-next-digit state so direct numeric entry terminates without making a recalled/current Scientific operand disappear.
+- PASS (static): MS/M+ memory indicator state is derived from the resulting memory value; storing zero leaves M off.
+- PASS (static): successful applicable unary functions consume Inv and successful trig consumes Hyp; error exits preserve the selectors.
+- PASS (static): Int uses truncation toward zero and Inv+Int uses the signed fractional remainder.
+- PASS (static): Inv+x^2 maps to sqrt and Inv+x^3 maps to real cbrt.
+- PASS (static): completed Decimal/F-E display uses a 13-significant-digit record with the recovered fixed/scientific boundary while direct entry remains dynamically sized.
+- INTENTIONAL EXTENSION: unlimited parenthesis nesting, unrestricted Decimal direct-entry text, real expression Paste parsing, and '**' remain unchanged.
+- Rust lexical delimiter and platform-separation checks pass; Python helper scripts compile.
+- Cargo/native GUI execution remains unavailable because the Rust/wxDragon toolchain is not installed in this environment.
+
+Buildfix149 Scientific clear state, exponent layout and trig-zero fidelity
+- C clears Inv, Hyp and F-E; CE clears Inv/Hyp while preserving F-E.
+- Scientific/F-E exponent output uses the fixed three-column e+000/e-000 layout.
+- sin/cos apply the recovered 1e-15 post-operation zero clamp.
+- tan returns exact zero for the degree/radian multiples explicitly compared by CALC.EXE and retains the existing 1e15 asymptote guard.
+- Intentional OpenCalc improvements remain: unlimited valid parentheses, unrestricted Decimal entry, transactional expression Paste, and ** exponentiation.
+- Added regression tests for C/CE selector state, three-column scientific formatting, and canonical trig zeroes.
+- PASS: Rust lexical delimiter scan accepted all 20 source files.
+- PASS: platform-separation checks passed.
+- PASS: Python helper syntax and Bash helper syntax passed.
+- PASS: git diff --check reported no whitespace errors.
+- Cargo compilation and live GUI tests remain unavailable because the Rust/native GUI toolchain is not installed in this environment.
+
+Buildfix152 DMS/parenthesis/selector/parser corrections
+- PASS (static): DMS uses only the recovered second-modf remainder threshold 0.99999999999; no extra seconds split or explicit minute-60 degree carry remains.
+- PASS (static): Scientific parentheses use a dynamically sized frame stack; close-parenthesis evaluates only the active frame and restores the suspended outer expression.
+- PASS (static): nested-frame regression coverage includes 2*(3+(4*5)) resolving 20 -> 23 -> 46, while unlimited nesting remains intentional.
+- PASS (static): F2-F8 resolve in Standard mode and both front ends intercept them without altering hidden Scientific selectors; Calculator itself rejects non-Decimal base changes in Standard.
+- PASS (static): expression-parser int() truncates toward zero while floor() remains a separate floor operation.
+- PASS: Rust lexical delimiter scan and platform-separation checks pass.
+- Cargo/native GUI execution remains unavailable because the Rust/wxDragon toolchain is not installed in this environment.
+
+Buildfix157 shortcut-dialog textbox editing
+- PASS (static): Windows Search shortcuts, Shortcut keys and Preset name EDIT controls install the native edit-shortcut subclass.
+- PASS (static): Ctrl+A selects the whole native EDIT value; Backspace removes the selection or the preceding UTF-16 character without splitting surrogate pairs.
+- PASS: Rust lexical delimiter and platform-separation checks pass; Python/Bash helper syntax passes.
+- Cargo/native wxDragon execution remains unavailable in this environment.
+
+Buildfix158 validation
+- PASS: Rust lexical delimiter scan accepted 20 Rust source files.
+- PASS: platform separation checks passed for Windows wxDragon and Linux GTK.
+- PASS: Python helper scripts compile and Bash helper scripts pass syntax checks.
+- Static review: Windows Keyboard Shortcuts dialog now uses classic sunken section panels; preset selection is an editable wxComboBox populated from shortcuts/*.cfg; delete requires an owner-modal confirmation.
+- Static review: Linux dialog uses GTK frames, an editable ComboBoxText preset picker, and a modal AlertDialog confirmation.
+- Static review: the native Windows Ctrl+A/Backspace helper now also subclasses an EDIT child when called with a wxComboBox HWND.
+- Native cargo build/test could not be run because Rust/Cargo is not installed in the packaging environment.

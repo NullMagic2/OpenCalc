@@ -15,7 +15,7 @@
 //! history_width=210
 
 use crate::calc::Mode;
-use crate::shortcuts::Shortcuts;
+use crate::shortcuts::{load_preset, Shortcuts};
 use crate::i18n::Language;
 use std::fs;
 #[cfg(target_os = "linux")]
@@ -118,7 +118,11 @@ impl Settings {
             #[cfg(not(target_os = "linux"))]
             history_width: DEFAULT_HISTORY_WIDTH,
             graph_visible: false,
-            shortcuts: Shortcuts::default(),
+            // On a fresh install the human-editable shortcuts/default.cfg is
+            // the startup preset. If it is missing or malformed, fall back to
+            // the compiled pristine defaults. Restore Defaults always uses the
+            // latter, so editing default.cfg can never destroy the reset path.
+            shortcuts: load_preset("default").unwrap_or_default(),
             storage_path,
         }
     }

@@ -15,11 +15,11 @@ mod imp;
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 compile_error!("OpenCalc supports only Linux and Windows.");
 
-pub use imp::message;
+pub use imp::{invalid_input_beep, message};
 
 #[cfg(target_os = "windows")]
 pub use imp::{
-    activate_statistics_companion, apply_classic_theme, center_window_on_work_area,
+    activate_statistics_companion, apply_classic_theme, center_window_on_work_area, confirm,
     client_size_pixels, copy_text, dismiss_context_tooltip,
     enable_clip_siblings, enable_modern_dpi_awareness, fit_calculator_surface,
     has_keyboard_focus, history_text_position_from_point,
@@ -27,10 +27,9 @@ pub use imp::{
     install_classic_group_box_painter, install_classic_separator_painter,
     install_classic_splitter_painter, install_classic_sunken_field_painter,
     install_classic_vertical_separator_painter, install_companion_activation_guard,
-    install_click_activation_focus_recovery, install_context_help,
-    install_keydown_translation, keydown_character,
-    install_context_help_dismissal, install_selector_notifier,
-    install_window_state_notifier, install_select_all_shortcut, is_button_checked, paste_text,
+    install_context_help, install_context_help_dismissal, install_click_activation_focus_recovery,
+    install_keydown_translation, install_selector_notifier, install_window_state_notifier,
+    install_select_all_shortcut, is_button_checked, keydown_character, paste_text,
     selected_text, position_statistics_companion, pulse_classic_button,
     scale_classic_control_metric,
     set_calculator_icon, set_companion_application_active,

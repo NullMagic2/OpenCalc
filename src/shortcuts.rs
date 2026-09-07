@@ -1,11 +1,14 @@
 //! Shared, configurable keyboard commands for both native interfaces.
 use crate::calc::{Base, BinaryOp};
 use crate::expr::AngleMode;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Digit(char), Dot, Back, CE, C, Sign, Eq, Percent, Bin(BinaryOp),
-    KeyboardStar, Unary(&'static str), MemC, MemR, MemS, MemAdd, Pi,
+    KeyboardStar, Unary(&'static str), Exp, MemC, MemR, MemS, MemAdd, Pi,
     Open, Close, StatsOpen, StatsDat, StatsAvg, StatsSum, StatsDev,
     ToggleFE, Copy, Paste, About, Help,
 }
@@ -13,7 +16,7 @@ pub enum Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Button(Action), Percent, Square, Inv, Hyp, Undo, Redo,
-    Base(Base), Angle(AngleMode), F6,
+    Base(Base), Angle(AngleMode), Word, F6,
 }
 
 pub struct ShortcutDef {
@@ -83,7 +86,7 @@ shortcuts! {
     ("ln", "Natural logarithm", "N, Shift+N", C::Button(A::Unary("ln")), true),
     ("log", "Logarithm", "L, Shift+L", C::Button(A::Unary("log")), true),
     ("dms", "Degrees / minutes / seconds", "M, Shift+M", C::Button(A::Unary("dms")), true),
-    ("exp", "Exponent entry", "X, Shift+X", C::Button(A::Unary("exp")), true),
+    ("exp", "Exponent entry", "X, Shift+X", C::Button(A::Exp), true),
     ("pi", "Pi", "P, Shift+P", C::Button(A::Pi), true),
     ("inv", "Toggle inverse", "I, Shift+I", C::Inv, true),
     ("hyp", "Toggle hyperbolic", "H, Shift+H", C::Hyp, true),
@@ -101,12 +104,13 @@ shortcuts! {
     ("stats_average", "Statistics: average", "Ctrl+A", C::Button(A::StatsAvg), true),
     ("stats_sum", "Statistics: sum", "Ctrl+T", C::Button(A::StatsSum), true),
     ("stats_deviation", "Statistics: standard deviation", "Ctrl+D", C::Button(A::StatsDev), true),
-    ("degrees", "Degrees (decimal mode)", "F2", C::Angle(AngleMode::Degrees), true),
-    ("grads", "Grads (decimal mode)", "F4", C::Angle(AngleMode::Grads), true),
-    ("hex", "Hexadecimal base", "F5", C::Base(Base::Hex), true),
-    ("radians_decimal", "Radians / decimal base", "F6", C::F6, true),
-    ("oct", "Octal base", "F7", C::Base(Base::Oct), true),
-    ("bin", "Binary base", "F8", C::Base(Base::Bin), true),
+    ("degrees", "Degrees / Dword", "F2", C::Angle(AngleMode::Degrees), false),
+    ("word", "Radians / Word", "F3", C::Word, false),
+    ("grads", "Grads / Byte", "F4", C::Angle(AngleMode::Grads), false),
+    ("hex", "Hexadecimal base", "F5", C::Base(Base::Hex), false),
+    ("radians_decimal", "Decimal base", "F6", C::F6, false),
+    ("oct", "Octal base", "F7", C::Base(Base::Oct), false),
+    ("bin", "Binary base", "F8", C::Base(Base::Bin), false),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -207,6 +211,15 @@ impl Shortcuts {
         DEFINITIONS.iter().zip(self.texts()).map(|(def, keys)| format!("shortcut.{}={}\n", def.id, keys)).collect()
     }
 
+    pub fn to_preset_config(&self) -> String {
+        let mut text = String::from(
+            "# OpenCalc keyboard shortcut preset\n\
+# Edit with any text editor. Leave a value blank to disable that action.\n",
+        );
+        text.push_str(&self.to_config());
+        text
+    }
+
     pub fn from_config(text: &str) -> Result<Self, String> {
         let mut values = Self::default().texts();
         for line in text.lines() {
@@ -216,6 +229,117 @@ impl Shortcuts {
         }
         Self::from_texts(&values)
     }
+}
+
+pub fn find_shortcut(query: &str, texts: &[String]) -> Option<usize> {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+    DEFINITIONS.iter().enumerate().find_map(|(index, def)| {
+        let keys = texts.get(index).map(String::as_str).unwrap_or(def.defaults);
+        (def.id.to_ascii_lowercase().contains(&query)
+            || def.label.to_ascii_lowercase().contains(&query)
+            || keys.to_ascii_lowercase().contains(&query))
+            .then_some(index)
+    })
+}
+
+pub const PRESET_DIR_NAME: &str = "shortcuts";
+pub const DEFAULT_PRESET_FILE: &str = "default.cfg";
+
+/// Human-editable shortcut presets live beside the executable in
+/// `shortcuts/*.cfg`.
+pub fn preset_directory() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.join(PRESET_DIR_NAME)))
+        .unwrap_or_else(|| PathBuf::from(PRESET_DIR_NAME))
+}
+
+pub fn preset_names() -> io::Result<Vec<String>> {
+    preset_names_in(&preset_directory())
+}
+
+fn preset_names_in(directory: &Path) -> io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(names),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if !extension.eq_ignore_ascii_case("cfg") {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
+            if !stem.trim().is_empty() {
+                names.push(stem.to_string());
+            }
+        }
+    }
+    names.sort_by_key(|name| {
+        let lower = name.to_ascii_lowercase();
+        (lower != "default", lower)
+    });
+    names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    Ok(names)
+}
+
+pub fn load_preset(name: &str) -> Result<Shortcuts, String> {
+    load_preset_from(&preset_directory(), name)
+}
+
+fn load_preset_from(directory: &Path, name: &str) -> Result<Shortcuts, String> {
+    let path = preset_path(directory, name)?;
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("Unable to read shortcut preset {}: {error}", path.display()))?;
+    Shortcuts::from_config(&text)
+        .map_err(|error| format!("Invalid shortcut preset {}: {error}", path.display()))
+}
+
+pub fn save_preset(name: &str, shortcuts: &Shortcuts) -> Result<PathBuf, String> {
+    save_preset_to(&preset_directory(), name, shortcuts)
+}
+
+fn save_preset_to(directory: &Path, name: &str, shortcuts: &Shortcuts) -> Result<PathBuf, String> {
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("Unable to create shortcut preset folder {}: {error}", directory.display()))?;
+    let path = preset_path(directory, name)?;
+    fs::write(&path, shortcuts.to_preset_config())
+        .map_err(|error| format!("Unable to save shortcut preset {}: {error}", path.display()))?;
+    Ok(path)
+}
+
+pub fn delete_preset(name: &str) -> Result<(), String> {
+    let path = preset_path(&preset_directory(), name)?;
+    fs::remove_file(&path)
+        .map_err(|error| format!("Unable to delete shortcut preset {}: {error}", path.display()))
+}
+
+fn preset_path(directory: &Path, name: &str) -> Result<PathBuf, String> {
+    let mut clean = name.trim();
+    if clean.to_ascii_lowercase().ends_with(".cfg") {
+        clean = &clean[..clean.len() - 4];
+    }
+    if clean.is_empty() {
+        return Err("Enter a shortcut preset name.".into());
+    }
+    if clean == "."
+        || clean == ".."
+        || clean.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    {
+        return Err("Preset names may not contain path or filename-reserved characters.".into());
+    }
+    Ok(directory.join(format!("{clean}.cfg")))
 }
 
 #[cfg(target_os = "windows")]
@@ -292,10 +416,59 @@ mod tests {
         assert_eq!(shortcuts.resolve(&key("Ctrl+M"), false), Some(C::Button(A::MemS)));
         assert_eq!(shortcuts.resolve(&key("S"), false), None);
         assert_eq!(shortcuts.resolve(&key("S"), true), Some(C::Button(A::Unary("sin"))));
+        assert_eq!(shortcuts.resolve(&key("F2"), true), Some(C::Angle(AngleMode::Degrees)));
+        assert_eq!(shortcuts.resolve(&key("F3"), true), Some(C::Word));
+        assert_eq!(shortcuts.resolve(&key("F4"), true), Some(C::Angle(AngleMode::Grads)));
+        assert_eq!(shortcuts.resolve(&key("F5"), true), Some(C::Base(Base::Hex)));
+        assert_eq!(shortcuts.resolve(&key("F6"), true), Some(C::F6));
+        assert_eq!(shortcuts.resolve(&key("F7"), true), Some(C::Base(Base::Oct)));
+        assert_eq!(shortcuts.resolve(&key("F8"), true), Some(C::Base(Base::Bin)));
+        // The original accelerator table also dispatches these keys in Standard
+        // mode; the UI then routes all seven selector commands through Decimal.
+        assert_eq!(shortcuts.resolve(&key("F2"), false), Some(C::Angle(AngleMode::Degrees)));
+        assert_eq!(shortcuts.resolve(&key("F3"), false), Some(C::Word));
+        assert_eq!(shortcuts.resolve(&key("F4"), false), Some(C::Angle(AngleMode::Grads)));
+        assert_eq!(shortcuts.resolve(&key("F5"), false), Some(C::Base(Base::Hex)));
+        assert_eq!(shortcuts.resolve(&key("F6"), false), Some(C::F6));
+        assert_eq!(shortcuts.resolve(&key("F7"), false), Some(C::Base(Base::Oct)));
+        assert_eq!(shortcuts.resolve(&key("F8"), false), Some(C::Base(Base::Bin)));
     }
     #[test]
     fn old_settings_and_unknown_future_commands_use_defaults() {
         assert_eq!(Shortcuts::from_config("mode=scientific\nshortcut.future=Q").unwrap(), Shortcuts::default());
+    }
+    #[test]
+    fn preset_files_are_plain_text_and_restore_defaults_ignore_an_edited_default_file() {
+        assert_eq!(
+            Shortcuts::from_config(include_str!("../shortcuts/default.cfg")).unwrap(),
+            Shortcuts::default(),
+            "the shipped default.cfg must mirror the compiled pristine defaults"
+        );
+        let root = std::env::temp_dir().join(format!("opencalc-shortcuts-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let defaults = Shortcuts::default();
+        save_preset_to(&root, "default", &defaults).unwrap();
+        assert_eq!(load_preset_from(&root, "default").unwrap(), defaults);
+
+        let mut altered_texts = defaults.texts();
+        altered_texts[0] = "Q".into();
+        let altered = Shortcuts::from_texts(&altered_texts).unwrap();
+        save_preset_to(&root, "default.cfg", &altered).unwrap();
+        assert_eq!(load_preset_from(&root, "default").unwrap(), altered);
+        assert_eq!(Shortcuts::default(), defaults, "Restore Defaults must not trust an edited default.cfg");
+
+        save_preset_to(&root, "Minimal keys", &defaults).unwrap();
+        assert_eq!(preset_names_in(&root).unwrap(), vec!["default".to_string(), "Minimal keys".to_string()]);
+        assert!(preset_path(&root, "../escape").is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+    #[test]
+    fn shortcut_search_matches_action_id_label_and_current_keys() {
+        let texts = Shortcuts::default().texts();
+        assert_eq!(find_shortcut("memory store", &texts), DEFINITIONS.iter().position(|def| def.id == "memory_store"));
+        assert_eq!(find_shortcut("ctrl+m", &texts), DEFINITIONS.iter().position(|def| def.id == "memory_store"));
+        assert_eq!(find_shortcut("radians_decimal", &texts), DEFINITIONS.iter().position(|def| def.id == "radians_decimal"));
+        assert_eq!(find_shortcut("not a shortcut", &texts), None);
     }
     #[cfg(target_os = "windows")]
     #[test]

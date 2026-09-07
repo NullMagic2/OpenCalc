@@ -113,7 +113,10 @@ type EnumWindowsProc = Option<unsafe extern "system" fn(Hwnd, isize) -> Bool>;
 const CF_UNICODETEXT: Uint = 13;
 const GMEM_MOVEABLE: Uint = 0x0002;
 const MB_OK: Uint = 0x0000;
+const MB_YESNO: Uint = 0x0004;
+const MB_ICONQUESTION: Uint = 0x0020;
 const MB_ICONINFORMATION: Uint = 0x0040;
+const IDYES: i32 = 6;
 const WM_PAINT: Uint = 0x000F;
 const WM_SIZE: Uint = 0x0005;
 const WM_ERASEBKGND: Uint = 0x0014;
@@ -140,6 +143,7 @@ const WM_KILLFOCUS: Uint = 0x0008;
 const WM_GETFONT: Uint = 0x0031;
 const EM_GETSEL: Uint = 0x00B0;
 const EM_SETSEL: Uint = 0x00B1;
+const WM_CLEAR: Uint = 0x0303;
 const EM_POSFROMCHAR: Uint = 0x00D6;
 const EM_CHARFROMPOS: Uint = 0x00D7;
 const EM_LINEINDEX: Uint = 0x00BB;
@@ -252,6 +256,8 @@ unsafe extern "system" {
     fn GetClipboardData(format: Uint) -> Handle;
     fn SetClipboardData(format: Uint, memory: Handle) -> Handle;
     fn MessageBoxW(hwnd: Hwnd, text: *const u16, caption: *const u16, kind: Uint) -> i32;
+    fn FindWindowExW(parent: Hwnd, child_after: Hwnd, class_name: *const u16, window_name: *const u16) -> Hwnd;
+    fn MessageBeep(kind: Uint) -> Bool;
     fn CreateIconFromResourceEx(
         bits: *mut u8,
         size: Uint,
@@ -752,8 +758,12 @@ thread_local! {
 }
 
 unsafe extern "system" fn keydown_translation_proc(
-    hwnd: Hwnd, message: Uint, wparam: usize, lparam: isize,
-    _id: usize, _ref_data: usize,
+    hwnd: Hwnd,
+    message: Uint,
+    wparam: usize,
+    lparam: isize,
+    _id: usize,
+    _ref_data: usize,
 ) -> isize {
     if message == 0x0087 && matches!(wparam, 13 | 27) {
         // WM_GETDLGCODE: Enter/Escape are calculator shortcuts. Prevent
@@ -763,21 +773,35 @@ unsafe extern "system" fn keydown_translation_proc(
     }
     if message == WM_KEYDOWN {
         return CURRENT_KEYDOWN.with(|current| {
-            let previous = current.replace(Some((wparam as u32, ((lparam as usize >> 16) & 0xff) as u32)));
+            let previous = current.replace(Some((
+                wparam as u32,
+                ((lparam as usize >> 16) & 0xff) as u32,
+            )));
             let result = DefSubclassProc(hwnd, message, wparam, lparam);
             current.set(previous);
             result
         });
     }
     if message == WM_NCDESTROY {
-        let _ = RemoveWindowSubclass(hwnd, Some(keydown_translation_proc), KEYDOWN_TRANSLATION_SUBCLASS_ID);
+        let _ = RemoveWindowSubclass(
+            hwnd,
+            Some(keydown_translation_proc),
+            KEYDOWN_TRANSLATION_SUBCLASS_ID,
+        );
     }
     DefSubclassProc(hwnd, message, wparam, lparam)
 }
 
 pub fn install_keydown_translation(hwnd: *mut c_void) {
     if !hwnd.is_null() {
-        unsafe { SetWindowSubclass(hwnd as Hwnd, Some(keydown_translation_proc), KEYDOWN_TRANSLATION_SUBCLASS_ID, 0); }
+        unsafe {
+            let _ = SetWindowSubclass(
+                hwnd as Hwnd,
+                Some(keydown_translation_proc),
+                KEYDOWN_TRANSLATION_SUBCLASS_ID,
+                0,
+            );
+        }
     }
 }
 
@@ -787,13 +811,27 @@ pub fn keydown_character() -> Option<char> {
     let (key, scan) = CURRENT_KEYDOWN.with(|current| current.get())?;
     unsafe {
         let mut state = [0u8; 256];
-        if GetKeyboardState(state.as_mut_ptr()) == 0 { return None; }
+        if GetKeyboardState(state.as_mut_ptr()) == 0 {
+            return None;
+        }
         // Ctrl is part of the shortcut chord, not a request for a control
         // character. Alt/AltGr are excluded by the caller.
-        for index in [0x11, 0xa2, 0xa3] { state[index] = 0; }
+        for index in [0x11, 0xa2, 0xa3] {
+            state[index] = 0;
+        }
         let mut text = [0u16; 4];
-        let count = ToUnicodeEx(key, scan, state.as_ptr(), text.as_mut_ptr(), text.len() as i32, 4, GetKeyboardLayout(0));
-        if count != 1 { return None; }
+        let count = ToUnicodeEx(
+            key,
+            scan,
+            state.as_ptr(),
+            text.as_mut_ptr(),
+            text.len() as i32,
+            4,
+            GetKeyboardLayout(0),
+        );
+        if count != 1 {
+            return None;
+        }
         char::from_u32(text[0] as u32).filter(|ch| !ch.is_control())
     }
 }
@@ -1685,7 +1723,40 @@ unsafe extern "system" fn select_all_edit_proc(
 ) -> isize {
     match message {
         WM_CHAR if wparam == 1 => {
+            // Native single-line EDIT controls do not consistently implement
+            // Ctrl+A themselves. Keep selection entirely inside the edit so a
+            // parent calculator/dialog accelerator cannot steal the chord.
             SendMessageW(hwnd, EM_SETSEL, 0, -1);
+            return 0;
+        }
+        WM_CHAR if wparam == 8 => {
+            // wx key events may bubble through the shortcut editor dialog before
+            // the native EDIT default handler gets Backspace. Delete the native
+            // selection ourselves (or the previous UTF-16 character when there
+            // is no selection) so ordinary textbox editing is deterministic.
+            let mut start = 0u32;
+            let mut end = 0u32;
+            SendMessageW(
+                hwnd,
+                EM_GETSEL,
+                &mut start as *mut u32 as usize,
+                &mut end as *mut u32 as isize,
+            );
+            if start == end && start > 0 {
+                let len = GetWindowTextLengthW(hwnd).max(0) as usize;
+                let mut text = vec![0u16; len + 1];
+                let copied = GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32).max(0) as usize;
+                let caret = (start as usize).min(copied);
+                let mut previous = caret.saturating_sub(1);
+                if previous > 0
+                    && (0xDC00..=0xDFFF).contains(&text[previous])
+                    && (0xD800..=0xDBFF).contains(&text[previous - 1])
+                {
+                    previous -= 1;
+                }
+                SendMessageW(hwnd, EM_SETSEL, previous, caret as isize);
+            }
+            SendMessageW(hwnd, WM_CLEAR, 0, 0);
             return 0;
         }
         WM_NCDESTROY => {
@@ -1696,18 +1767,35 @@ unsafe extern "system" fn select_all_edit_proc(
     DefSubclassProc(hwnd, message, wparam, lparam)
 }
 
-/// Give an ordinary native EDIT control an explicit Ctrl+A Select All command.
+/// Give an ordinary native EDIT control explicit Ctrl+A and Backspace editing.
+/// This is used by text fields that live inside dialogs whose keyboard events
+/// can otherwise be consumed by calculator shortcut processing.
 pub fn install_select_all_shortcut(hwnd: *mut c_void) {
     if hwnd.is_null() {
         return;
     }
     unsafe {
+        let hwnd = hwnd as Hwnd;
         SetWindowSubclass(
-            hwnd as Hwnd,
+            hwnd,
             Some(select_all_edit_proc),
             SELECT_ALL_SUBCLASS_ID,
             0,
         );
+
+        // wxComboBox owns a native EDIT child.  Shortcut-dialog preset names
+        // remain editable after the field becomes a combobox, so install the
+        // same Ctrl+A/Backspace handling on that child when one exists.
+        let edit_class = wide("Edit");
+        let edit = FindWindowExW(hwnd, null_mut(), edit_class.as_ptr(), std::ptr::null());
+        if !edit.is_null() {
+            SetWindowSubclass(
+                edit,
+                Some(select_all_edit_proc),
+                SELECT_ALL_SUBCLASS_ID,
+                0,
+            );
+        }
     }
 }
 
@@ -2416,6 +2504,12 @@ pub fn set_companion_application_active(companion_hwnd: *mut c_void, active: boo
     }
 }
 
+pub fn invalid_input_beep() {
+    // MB_OK is the same default system sound used by the classic Calculator
+    // for rejected keypad input.
+    unsafe { let _ = MessageBeep(MB_OK); }
+}
+
 pub fn message(title: &str, body: &str) {
     let title = wide(title);
     let body = wide(body);
@@ -2426,6 +2520,19 @@ pub fn message(title: &str, body: &str) {
             title.as_ptr(),
             MB_OK | MB_ICONINFORMATION,
         );
+    }
+}
+
+pub fn confirm(owner: *mut c_void, title: &str, body: &str) -> bool {
+    let title = wide(title);
+    let body = wide(body);
+    unsafe {
+        MessageBoxW(
+            owner as Hwnd,
+            body.as_ptr(),
+            title.as_ptr(),
+            MB_YESNO | MB_ICONQUESTION,
+        ) == IDYES
     }
 }
 

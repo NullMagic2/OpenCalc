@@ -29,6 +29,10 @@ if exist Help\CALC_PT-BR.CNT copy /Y Help\CALC_PT-BR.CNT target\release\Help\CAL
 if exist Help\CALC_ES.HLP copy /Y Help\CALC_ES.HLP target\release\Help\CALC_ES.HLP >nul
 if exist Help\CALC_ES.CNT copy /Y Help\CALC_ES.CNT target\release\Help\CALC_ES.CNT >nul
 if exist calc.tooltip copy /Y calc.tooltip target\release\calc.tooltip >nul
+if not exist target\release\shortcuts mkdir target\release\shortcuts
+for %%F in (shortcuts\*.cfg) do (
+  if exist "%%F" copy /Y "%%F" target\release\shortcuts\ >nul
+)
 
 echo Built OpenCalc.exe with the embedded calc95.ico resource
 if exist hlp-viewer.exe echo Included companion hlp-viewer.exe
@@ -39,6 +43,7 @@ if exist Help\CALC_PT-BR.CNT echo Included Portuguese Help\CALC_PT-BR.CNT
 if exist Help\CALC_ES.HLP echo Included Spanish Help\CALC_ES.HLP
 if exist Help\CALC_ES.CNT echo Included Spanish Help\CALC_ES.CNT
 if exist calc.tooltip echo Included calc.tooltip context-help catalog
+if exist shortcuts\default.cfg echo Included shortcuts\*.cfg keyboard presets
 if not exist Help\CALC_EN.HLP echo Note: English Help\CALC_EN.HLP is missing.
 if not exist Help\CALC_PT-BR.HLP echo Note: Portuguese Help\CALC_PT-BR.HLP is missing; Portuguese Help will be unavailable.
 if not exist Help\CALC_ES.HLP echo Note: Spanish Help\CALC_ES.HLP is missing; Spanish Help will be unavailable.

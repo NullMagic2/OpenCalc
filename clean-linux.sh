@@ -15,7 +15,7 @@ echo "Cleaning OpenCalc Linux build output..."
 rm -rf -- "$SCRIPT_DIR/target"
 if [[ -d "$SCRIPT_DIR/build-linux" ]]; then
     find "$SCRIPT_DIR/build-linux" -mindepth 1 -maxdepth 1 \
-        ! -name 'OpenCalc.cfg' -exec rm -rf -- {} +
+        ! -name 'OpenCalc.cfg' ! -name 'shortcuts' -exec rm -rf -- {} +
     rmdir "$SCRIPT_DIR/build-linux" 2>/dev/null || true
 fi
 rm -f -- "$SCRIPT_DIR/OpenCalc"

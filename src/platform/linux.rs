@@ -1,6 +1,14 @@
 //! Linux process integration. The Linux GUI itself is implemented with gtk4-rs.
 
 use std::path::PathBuf;
+use std::io::{self, Write};
+
+pub fn invalid_input_beep() {
+    // GTK4 no longer exposes the old gdk_display_beep API consistently across
+    // backends.  Emit the terminal bell as the portable Linux fallback.
+    let _ = io::stdout().write_all(b"\x07");
+    let _ = io::stdout().flush();
+}
 
 pub fn message(title: &str, body: &str) {
     if title.trim().is_empty() {

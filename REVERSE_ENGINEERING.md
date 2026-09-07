@@ -88,7 +88,7 @@ s     cos   x^3   n!    M+   0    +/-  .    +    =     Int
 Dat   tan   x^2   1/x   PI   A    B    C    D    E     F
 ```
 
-The previous buildfix2 interpretation was wrong: it transposed the four scientific-function columns into a 4×5 block and then invented separate bottom rows for logic, hexadecimal digits and Dword/Word/Byte. Those extra rows are not present in the reference layout and have been removed.
+The previous buildfix2 interpretation was wrong: it transposed the four scientific-function columns into a 4×5 block and then invented separate bottom rows for logic, hexadecimal digits and Dword/Word/Byte. Those extra rows are not present in the reference layout and have been removed. Dword/Word/Byte are nevertheless real controls: in the reference they reuse the same right-hand three-radio group as Deg/Rad/Grad. Decimal mode labels that group Deg/Rad/Grad; Hex, Oct and Bin relabel it Dword/Word/Byte.
 
 Pixel sampling of the supplied reference screenshot confirms the three key text colors as exact `RGB(255,0,0)`, `RGB(0,0,255)`, and `RGB(128,0,128)`.
 
@@ -272,7 +272,7 @@ Ctrl+L/R/M/P    MC / MR / MS / M+
 Ctrl+S/A/T/D    Sta / Ave / Sum / s
 Ctrl+Insert     Copy
 Shift+Insert    Paste
-F2/F4/F6        Deg / Grad / Rad while decimal
+F2/F3/F4        Deg / Rad / Grad while decimal; Dword / Word / Byte otherwise
 F5/F6/F7/F8     Hex / Dec / Oct / Bin as applicable
 ```
 
@@ -303,3 +303,209 @@ The supplied 59,392-byte Windows 95 `CALC.EXE` was checked again (SHA-256 `b064b
 
 That write explains the visible behavior: `Dat` does not erase the number that was just stored, but the next digit replaces the display instead of being appended to it. The same common reset runs after `Ave`, `Sum`, and `s`. OpenCalc now mirrors that state transition in the shared `Calculator` model by ending the current entry and clearing its explicit decimal-entry bit after every Statistics command. Both frontends therefore inherit the behavior without separate event-handler code.
 
+
+## Buildfix143: exact Win95 Dword / Word / Byte semantics
+
+A second audit of the supplied 59,392-byte Windows 95 `CALC.EXE` showed that
+buildfix140/141 had recovered the selector labels and the final output mask, but
+had not yet reproduced the complete state model behind those selectors.
+
+The selector dispatcher at `0x004037C7..0x0040380A` subtracts control ID 127 to
+obtain selector index 0/1/2.  In a non-decimal radix it reads the mask table at
+`0x0040C418` and stores the selected mask at `0x0040C0FC`.  The three DWORDs in
+that table are, in order:
+
+```text
+Dword  0xFFFFFFFF
+Word   0x0000FFFF
+Byte   0x000000FF
+```
+
+The crucial detail is *where* that mask is used.  The non-decimal display path
+at `0x0040426C..0x004042FE` first passes the current x87 value through the CRT
+floor path at `0x0040590F` and writes the integerized result back to
+`0x0040C068`.  It then checks the magnitude against `4294967295.0`
+(`0x0040A4B0`).  Only after that check does it convert the integer to EAX and
+execute `AND [0x0040C0FC]` at `0x004042C8`.  Therefore Word and Byte are
+lower-bit **display views**, not 16-bit/8-bit arithmetic accumulators.  Hidden
+upper bits of the full non-decimal integer remain part of the current value and
+reappear when Dword is selected.  Fractions do not remain hidden: entering a
+non-decimal radix canonicalizes them with floor first.
+
+Direct non-decimal digit entry follows the same rule.  At
+`0x00402D35..0x00402D4C`, CALC.EXE computes `current * radix + digit` into the
+full numeric state at `0x0040C068`, then calls the common display routine.  A
+Word entry can consequently contain more than 16 significant bits even though
+only the low 16 bits are visible; changing to Dword exposes those hidden bits.
+Backspace and sign handling must operate on that full entry rather than on the
+masked display string.
+
+The bitwise operators are DWORD operations regardless of the selected display
+width.  `And`, `Or` and `Xor` at `0x00404DAB..0x00404E06`, and `Lsh` at
+`0x00404E0B..0x00404E2A`, consume the low 32 bits in x86 registers and store the
+result with `FILD DWORD`, giving a signed 32-bit internal result.  The x86 shift
+therefore masks its count to five bits.  Unary `Not` at
+`0x00404399..0x004043CB` likewise uses `NOT EAX` followed by `FILD DWORD`.
+
+Buildfix143 implements those recovered rules for Hex, Oct and Bin alike.  For
+example, with Word selected, `FFFF * 2` displays `FFFE` but retains the full
+value `0x1FFFE`; selecting Dword then displays `1FFFE`.  With Byte selected,
+`FF + 1` displays `0` while the full value remains `0x100`.  The equivalent
+masking occurs in octal (`377 + 1`) and binary (`11111111 + 1`).  A value whose
+full magnitude exceeds one unsigned DWORD is rejected before any Word/Byte
+mask can hide the overflow.
+
+## Buildfix144: remaining selector/radix details recovered from CALC.EXE
+
+The buildfix143 audit was extended through the inverse-shift dispatcher, the
+non-decimal integerization path, and the original accelerator resource.  Three
+details were still missing from OpenCalc.
+
+First, `Inv+Lsh` is the Windows 95 calculator's right shift.  At
+`0x00402DD7..0x00402DFA`, an active Inv flag combined with command `0x59`
+(Lsh) is replaced by internal operation `7`, and Inv is cleared.  Operation 7
+at `0x00404D8A..0x00404DA9` converts both operands to DWORDs and executes x86
+`SAR`, not `SHR`.  Right shift is therefore **arithmetic/signed**, sign-extending
+bit 31, with the x86 five-bit shift-count rule.  The original input table has
+`<` for Lsh; there is no separate `>` accelerator in this Windows 95 binary,
+so right shift remains Inv+Lsh rather than a new visible key binding.
+
+Second, the integerization step described above is state-changing.  The helper
+at `0x0040590F` sets an x87 round-down control word and reaches `FRNDINT` at
+`0x00406C5B`; `0x004041F9` stores that result back before testing the DWORD
+limit.  Consequently Hex/Oct/Bin arithmetic and decimal-to-non-decimal base
+changes retain the floored integer, not an undisplayed fractional value.  For
+example, decimal `-1.1` becomes integer `-2` on conversion to a non-decimal
+radix, and `5 / 2` in a non-decimal radix finishes as integer `2`.
+
+Third, the shared selector's function-key mapping is F2/F3/F4 in **both** label
+sets.  The accelerator resource beginning at raw file offset `0xD05C` maps
+`VK_F2/VK_F3/VK_F4` to control IDs `0x7F/0x80/0x81`, while F5/F6/F7/F8 map to
+Hex/Dec/Oct/Bin (`0x7C/0x7B/0x7A/0x79`).  Thus decimal mode uses
+F2/F3/F4 = Deg/Rad/Grad; Hex/Oct/Bin use F2/F3/F4 = Dword/Word/Byte; and F6 is
+always Dec.  The earlier OpenCalc mapping of Rad to F6 was not faithful to the
+supplied executable.
+
+## Buildfix145: radix commit order, invalid-input beep, PI and Exp
+
+A further pass over the Scientific command dispatcher exposed five behaviors
+around the radix selectors that are separate from the Dword/Word/Byte masks.
+
+The base command writes the newly selected radix before running the common
+conversion/display path (`0x004050C4..0x004050CB`).  A Decimal value that is
+outside the unsigned-DWORD domain therefore leaves Hex/Oct/Bin selected even
+when conversion reports `Result is too large.`  Clearing after that error
+starts at zero in the newly selected radix.
+
+Standard mode explicitly dispatches Decimal while changing layouts
+(`0x004016B0..0x004016BC`).  OpenCalc must therefore reset the radix to Decimal
+when entering Standard rather than preserving a hidden Scientific radix.
+
+The numeric input dispatcher compares a candidate digit with the active radix
+and calls `MessageBeep` when the digit is not representable
+(`0x00402CD0..0x00402CE1`).  The decimal-point command follows the same user
+feedback convention when a non-decimal radix is active.  Rejected input does
+not alter the numeric state.
+
+PI has a Decimal-only guard in the Scientific dispatcher
+(`0x004035C6..0x0040361D`).  Plain PI enters pi; with Inv active it enters 2*pi
+and consumes Inv.  In non-decimal modes the command is rejected with the same
+invalid-input beep.
+
+Finally, Exp is not the mathematical exponential function.  Command dispatch
+at `0x00403758..0x0040378A` enters the exponent-input routine at `0x00405254`.
+The display uses a signed three-column exponent such as `12.e+003`; after C the
+special initial form is `1.e+000`.  The helper at `0x0040516B..0x0040517C`
+compares the current numeric exponent with 29 before multiplying it by ten and
+adding the next digit.  The three columns are therefore a rolling numeric field,
+not a three-keystroke counter: arbitrary leading zeroes remain acceptable, but
+the magnitude cannot advance past 289 for either sign.  Backspace performs the
+reverse decimal shift at `0x0040529F..0x004052C4` (289 -> 028 -> 002 -> 000),
+and +/- independently toggles the exponent sign at `0x004051F3..0x00405217`.
+The exponent-entry routine itself rejects only an already-active exponent field,
+so a completed Decimal result can enter Exp mode too; the implicit mantissa 1 is
+used only when the common entry buffer length is actually zero.  Mathematical
+e^x remains available through Inv+ln; it is not attached to the Exp button.
+
+## Buildfix146: state-machine fidelity versus obsolete limits
+
+A final state-machine pass after buildfix145 separates behavioral compatibility
+from limitations that do not need to be reproduced.  The original Calculator
+keeps an error state modal for calculator commands until C or CE, retains the
+last Standard binary operator/right operand for repeated `=`, preserves the
+current numeric value across Standard/Scientific layout changes, closes the
+modeless Statistics dialog when returning to Standard, and replaces a pending
+Scientific binary operator when another operator is selected.  OpenCalc now
+matches those behaviors.
+
+Two recovered limits are deliberately *not* treated as compatibility goals.
+CALC.EXE caps interactive parenthesis nesting at 25 and Decimal mantissa entry at
+13 digits.  OpenCalc keeps dynamically sized parenthesis and Decimal entry state
+instead.  This is the same compatibility policy already used for Paste: preserve
+observable arithmetic/state semantics, but do not recreate an obsolete capacity
+limit when removing it does not make ordinary Win95-compatible calculations
+behave differently.  Unmatched closing parentheses still use the classic
+invalid-input feedback path.
+
+## Buildfix147: memory entry, one-shot modifiers, Int/inverse powers and display formatting
+
+The unary dispatcher has a post-operation selector cleanup stage at
+`0x00403006..0x00403075`.  It is reached only after the unary routine succeeds;
+an error exits earlier at `0x00402FF4..0x00403001`.  Inv is cleared for the
+commands whose meaning it changes (including Int, trig, ln/log, square/cube and
+dms), while Hyp is cleared only for sin/cos/tan.  OpenCalc therefore models
+those selectors as one-shot only for applicable successful operations rather
+than treating the checkboxes as permanently latched modes.
+
+The accelerator resource maps `;` to command `0x60`, identifying the Int case
+at `0x00404341`.  That case calls the runtime split-number helper and uses the
+integer component in normal mode, which is truncation toward zero rather than
+floor.  Its inverse path uses the complementary fractional component.  The
+square/cube cases at `0x0040489A..0x00404943` branch on Inv: x^2 becomes sqrt
+and x^3 becomes the real cube-root operation when Inv is active.
+
+The common Decimal display routine at `0x004041F9` passes precision `0x0D`
+(13) to the decimal conversion helper at `0x00403F29`.  General formatting at
+`0x004040E9` switches to exponential form when the recovered decimal exponent
+is at least 13, or when the significant-digit count minus that exponent exceeds
+16.  F-E takes the explicit exponential formatter at `0x0040407B`.  Buildfix147
+moves this fidelity into the presentation layer only: direct-entry text remains
+unrestricted and arithmetic remains f64, but completed results are rounded and
+laid out from a 13-significant-digit decimal record like the reference.
+
+Memory commands also terminate direct numeric editing in the reference state
+machine.  Buildfix147 represents that independently from Scientific's
+"current operand exists" state: MR/MS/MC/M+ can make the next digit replace the
+visible value without causing an MR operand to disappear from a pending
+Scientific expression.  This separation preserves the observable Win95 rule
+without forcing OpenCalc back into the original tightly coupled input buffer.
+
+## Buildfix149: Scientific clear state, exponent columns and trig zeroes
+
+The central clear-command state machine distinguishes C from CE beyond their numeric buffer effects. In Scientific mode both release Inv and Hyp. C additionally clears the F-E display selector, while CE leaves F-E unchanged. OpenCalc now keeps that distinction in `Calculator::clear_all` versus `Calculator::clear_entry` instead of trying to reproduce it only in a front end.
+
+The exponential display path uses a fixed template with three exponent columns. The visible exponent is therefore `e+000` / `e-000`, not a variable-width language-runtime exponent. The 13-significant-digit conversion and fixed/scientific selection recovered for buildfix147 are retained; buildfix149 only corrects the final exponent-field layout.
+
+The direct trig routine contains additional floating-point cleanup around the x87 instructions. FSIN and FCOS results are compared against the constant `1e-15` at `0x0040A518`; magnitudes below that value are stored as exact zero. FPTAN is different: it has no corresponding general post-operation clamp. Instead, the dispatcher performs exact zero special cases for `|x| = 180, 360, 540, 720` degrees and `|x| = pi, 2pi, 3pi, 4pi` radians before FPTAN, then retains the existing `1e15` asymptote guard. The Grads path has no separate tangent exact-compare branch in the supplied executable.
+
+
+DMS normalization at `0x00404A0F..0x00404ABF` is narrower than a general seconds/minutes carry. The routine performs a second `modf()` split after scaling the first fractional component by 60 (normal DMS) or 100 (Inv+DMS), compares only that second split's fractional remainder with `0.99999999999`, and, when it is greater, increments that split's integer component and zeros the remainder. It does not perform an additional third split that rounds arbitrary `30.999...` seconds, nor does it explicitly carry a resulting minute value of 60 into the degree field.
+
+## Buildfix152: dynamic parenthesis frames, Standard selector invariants and parser Int
+
+The original Scientific close-parenthesis handler saves and restores per-level calculation state rather than evaluating the entire visible expression at once. OpenCalc now mirrors that observable behavior with a dynamically sized frame stack: `(` suspends the outer Scientific expression, `)` evaluates only the active frame, and the resulting operand is restored into the outer frame. This preserves outer operations and nested groups while deliberately omitting CALC.EXE's 25-frame capacity limit.
+
+The Standard-mode selector dispatch path at `0x0040309E..0x004030AC` routes F2-F8 through Decimal rather than allowing the hidden Scientific Deg/Rad/Grad, Dword/Word/Byte, or radix state to change. Both front ends now intercept these selector accelerators in Standard mode, and the core additionally refuses non-Decimal radix changes while Standard is active.
+
+OpenCalc's richer expression grammar intentionally remains an extension of the classic command-by-command calculator, but named functions should agree with their corresponding buttons. The parser therefore maps `int(x)` to truncation toward zero, while keeping `floor(x)` as a distinct modern function.
+
+
+## Buildfix153: entry sign state, Scientific equals and radix-stable operands
+
+The `+/-` dispatcher around `0x004033DF..0x00403417` keeps entry sign separately from numeric magnitude. A zero/new operand can therefore carry a negative sign invisibly until the next digit is entered. OpenCalc now models that input state explicitly instead of treating zero as an unconditional no-op.
+
+The Scientific equals path shares the original saved-operand behavior: when a binary operator is immediately followed by `=`, the displayed left operand supplies the missing RHS, and the resulting operator/RHS pair is retained for repeated equals.
+
+Scientific expression accumulation now preserves the radix of each operand at entry time. Decimal operands remain canonical decimal literals, while non-Decimal operands are stored with explicit `0x`, `0o`, or `0b` prefixes. Internal Scientific evaluation therefore never re-qualifies earlier bare operands using a radix selected later. The enhanced Paste path intentionally remains separate and continues interpreting bare pasted integers in the currently selected radix.
+
+The Backspace handler's invalid-state branch in the reference calculator reaches `MessageBeep`; both front ends now route non-editable Backspace actions through OpenCalc's existing invalid-input beep helper.

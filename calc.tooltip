@@ -93,7 +93,7 @@ Converts the displayed number to the binary number system. The maximum unsigned 
 Sets trigonometric input to degrees when in decimal mode. Keyboard equivalent = F2
 
 [en.rad]
-Sets trigonometric input to radians when in decimal mode. Keyboard equivalent = F6
+Sets trigonometric input to radians when in decimal mode. Keyboard equivalent = F3
 
 [en.grad]
 Sets trigonometric input to grads when in decimal mode. Keyboard equivalent = F4
@@ -293,7 +293,7 @@ Converte o número exibido para o sistema numérico binário. O valor binário m
 Define a entrada trigonométrica como graus quando se está em modo decimal. Equivalente de teclado = F2
 
 [pt.rad]
-Define a entrada trigonométrica como radianos quando se está em modo decimal. Equivalente de teclado = F6
+Define a entrada trigonométrica como radianos quando se está em modo decimal. Equivalente de teclado = F3
 
 [pt.grad]
 Define a entrada trigonométrica como gradientes quando se está em modo decimal. Equivalente de teclado = F4
@@ -493,7 +493,7 @@ Convierte el número mostrado al sistema numérico binario. El valor binario má
 Establece la entrada trigonométrica en grados cuando se está en modo decimal. Equivalente de teclado = F2
 
 [es.rad]
-Establece la entrada trigonométrica en radianes cuando se está en modo decimal. Equivalente de teclado = F6
+Establece la entrada trigonométrica en radianes cuando se está en modo decimal. Equivalente de teclado = F3
 
 [es.grad]
 Establece la entrada trigonométrica en grados centesimales cuando se está en modo decimal. Equivalente de teclado = F4

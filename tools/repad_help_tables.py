@@ -196,8 +196,8 @@ SCIENTIFIC_ROWS = {
 
 CONTROL_ROWS = {
     "en": [
-        ("F2", "Select Degrees."), ("F4", "Select Grads."), ("F5", "Select Hex."),
-        ("F6", "Select Radians; otherwise Dec."), ("F7", "Select Oct."), ("F8", "Select Bin."),
+        ("F2", "Degrees / Dword."), ("F3", "Radians / Word."), ("F4", "Grads / Byte."), ("F5", "Select Hex."),
+        ("F6", "Select Dec."), ("F7", "Select Oct."), ("F8", "Select Bin."),
         ("Insert", "Enter Statistics data (Dat)."), ("Ctrl+L", "Clear memory (MC)."),
         ("Ctrl+R", "Recall memory (MR)."), ("Ctrl+M", "Store in memory (MS)."),
         ("Ctrl+P", "Add to memory (M+)."), ("Ctrl+S", "Open Statistics (Sta)."),
@@ -206,8 +206,8 @@ CONTROL_ROWS = {
         ("Shift+Insert", "Paste a complete expression."),
     ],
     "pt": [
-        ("F2", "Seleciona Graus."), ("F4", "Seleciona Grads."), ("F5", "Seleciona Hex."),
-        ("F6", "Seleciona Radianos; nas bases, Dec."), ("F7", "Seleciona Oct."), ("F8", "Seleciona Bin."),
+        ("F2", "Graus / Dword."), ("F3", "Radianos / Word."), ("F4", "Grads / Byte."), ("F5", "Seleciona Hex."),
+        ("F6", "Seleciona Dec."), ("F7", "Seleciona Oct."), ("F8", "Seleciona Bin."),
         ("Insert", "Registra dados (Dat)."), ("Ctrl+L", "Limpa a memória (MC)."),
         ("Ctrl+R", "Recupera a memória (MR)."), ("Ctrl+M", "Armazena na memória (MS)."),
         ("Ctrl+P", "Soma à memória (M+)."), ("Ctrl+S", "Abre Estatística (Sta)."),
@@ -216,8 +216,8 @@ CONTROL_ROWS = {
         ("Shift+Insert", "Cola uma expressão completa."),
     ],
     "es": [
-        ("F2", "Selecciona Grados."), ("F4", "Selecciona Grads."), ("F5", "Selecciona Hex."),
-        ("F6", "Selecciona Radianes; en bases, Dec."), ("F7", "Selecciona Oct."), ("F8", "Selecciona Bin."),
+        ("F2", "Grados / Dword."), ("F3", "Radianes / Word."), ("F4", "Grads / Byte."), ("F5", "Selecciona Hex."),
+        ("F6", "Selecciona Dec."), ("F7", "Selecciona Oct."), ("F8", "Selecciona Bin."),
         ("Insert", "Registra datos (Dat)."), ("Ctrl+L", "Borra la memoria (MC)."),
         ("Ctrl+R", "Recupera la memoria (MR)."), ("Ctrl+M", "Guarda en memoria (MS)."),
         ("Ctrl+P", "Suma a la memoria (M+)."), ("Ctrl+S", "Abre Estadística (Sta)."),
