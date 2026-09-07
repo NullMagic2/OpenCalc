@@ -535,6 +535,7 @@ pub fn run() -> Result<(), String> {
         bind_menu(&ui);
         bind_keyboard(&ui);
         bind_client_focus_recovery(&ui);
+        platform::install_click_activation_focus_recovery(ui.frame.get_handle());
         bind_splitter(&ui);
         bind_graph(&ui);
         bind_companion_tracking(&ui);
@@ -1557,6 +1558,10 @@ fn bind_history_text_recall(ui: &Rc<Ui>, text: TextCtrl) {
                 }
             }
         }
+        // This read-only field is a recall surface, not a keyboard input
+        // context. Native EDIT focus can still land here after returning from
+        // the external HLP viewer even though wx marks it non-focusable.
+        ui_c.frame.set_focus();
         // Consume the click: History behaves like a recall surface, not like a
         // selectable/editable text field with a caret.
         event.skip(false);
@@ -1881,23 +1886,28 @@ fn bind_statistics_keyboard(ui: &Rc<Ui>, frame: &Frame, panel: &Panel, list: &Li
     bind_keyboard_widget(ui, list, false);
 }
 
-fn bind_keyboard_widget<W: WindowEvents>(ui: &Rc<Ui>, widget: &W, display: bool) {
-    widget.on_key_down(keyboard_handler(Rc::clone(ui), display, true));
-    widget.on_char(keyboard_handler(Rc::clone(ui), display, false));
+fn bind_keyboard_widget<W: WindowEvents + WxWidget>(ui: &Rc<Ui>, widget: &W, display: bool) {
+    platform::install_keydown_translation(widget.get_handle());
+    widget.on_key_down(keyboard_handler(Rc::clone(ui), display));
 }
 
-fn keyboard_handler(ui: Rc<Ui>, display: bool, key_down: bool) -> impl Fn(WindowEventData) {
+fn keyboard_handler(ui: Rc<Ui>, display: bool) -> impl Fn(WindowEventData) {
     move |event| {
         let WindowEventData::Keyboard(key) = &event else { event.skip(true); return; };
         let raw = key.get_key_code().unwrap_or(0);
         let control = key.control_down() || key.cmd_down();
-        // Printable keys need CHAR's keyboard-layout translation. Handle control
-        // chords and navigation on KEY_DOWN before native controls consume them.
-        if key.alt_down() || (key_down && !control && raw > 32 && raw < 300 && raw != 127) {
+        // Buttons can receive KEY_DOWN without a subsequent CHAR after native
+        // menu/Help activation. Dispatch once here, before control processing.
+        if key.alt_down() {
             event.skip(true);
             return;
         }
-        let unicode = key.get_unicode_key().and_then(|code| char::from_u32(code as u32));
+        let unicode = if (32..300).contains(&raw) && raw != 127 {
+            let Some(ch) = platform::keydown_character() else { event.skip(true); return; };
+            Some(ch)
+        } else {
+            key.get_unicode_key().and_then(|code| char::from_u32(code as u32))
+        };
         let Some(chord) = crate::shortcuts::windows_key(raw, unicode, control, key.shift_down()) else {
             event.skip(true); return;
         };

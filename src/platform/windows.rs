@@ -121,6 +121,7 @@ const WM_CONTEXTMENU: Uint = 0x007B;
 const WM_ACTIVATE: Uint = 0x0006;
 const WM_MOUSEACTIVATE: Uint = 0x0021;
 const WA_INACTIVE: usize = 0;
+const WA_CLICKACTIVE: usize = 2;
 const MA_NOACTIVATE: isize = 3;
 const WM_LBUTTONDOWN: Uint = 0x0201;
 const WM_RBUTTONDOWN: Uint = 0x0204;
@@ -194,6 +195,8 @@ const CONTEXT_HELP_DISMISS_SUBCLASS_ID: usize = 0xCA1C_9507;
 const WINDOW_STATE_SUBCLASS_ID: usize = 0xCA1C_9508;
 const COMPANION_ACTIVE_SUBCLASS_ID: usize = 0xCA1C_9509;
 const COMPANION_OWNER_SUBCLASS_ID: usize = 0xCA1C_950B;
+const CLICK_ACTIVATION_FOCUS_SUBCLASS_ID: usize = 0xCA1C_950C;
+const KEYDOWN_TRANSLATION_SUBCLASS_ID: usize = 0xCA1C_950D;
 const ID_WHATS_THIS: usize = 0xCA1C;
 const MF_STRING: Uint = 0x0000;
 const TPM_RIGHTBUTTON: Uint = 0x0002;
@@ -309,6 +312,10 @@ unsafe extern "system" {
     fn GetForegroundWindow() -> Hwnd;
     fn GetActiveWindow() -> Hwnd;
     fn GetFocus() -> Hwnd;
+    fn GetKeyboardState(state: *mut u8) -> Bool;
+    fn GetKeyboardLayout(thread: u32) -> Handle;
+    fn ToUnicodeEx(key: Uint, scan: Uint, state: *const u8, text: *mut u16, count: i32, flags: Uint, layout: Handle) -> i32;
+    fn SetFocus(hwnd: Hwnd) -> Hwnd;
     fn SetForegroundWindow(hwnd: Hwnd) -> Bool;
     fn SetActiveWindow(hwnd: Hwnd) -> Hwnd;
     fn EnumChildWindows(parent: Hwnd, callback: EnumWindowsProc, lparam: isize) -> Bool;
@@ -687,6 +694,107 @@ pub fn install_context_help_dismissal(hwnd: *mut c_void) {
             CONTEXT_HELP_DISMISS_SUBCLASS_ID,
             0,
         );
+    }
+}
+
+unsafe extern "system" fn click_activation_focus_proc(
+    hwnd: Hwnd,
+    message: Uint,
+    wparam: usize,
+    lparam: isize,
+    _id: usize,
+    _ref_data: usize,
+) -> isize {
+    match message {
+        WM_ACTIVATE if (wparam & 0xFFFF) == WA_CLICKACTIVE => {
+            // Finish wx/DefWindowProc activation first, then replace any stale
+            // focus left behind by an external companion such as the HLP
+            // viewer. A subsequent click on an edit control still receives
+            // its normal mouse-focus transition, so graph editing and display
+            // selection remain intact.
+            let result = DefSubclassProc(hwnd, message, wparam, lparam);
+            let _ = SetFocus(hwnd);
+            result
+        }
+        WM_NCDESTROY => {
+            let _ = RemoveWindowSubclass(
+                hwnd,
+                Some(click_activation_focus_proc),
+                CLICK_ACTIVATION_FOCUS_SUBCLASS_ID,
+            );
+            DefSubclassProc(hwnd, message, wparam, lparam)
+        }
+        _ => DefSubclassProc(hwnd, message, wparam, lparam),
+    }
+}
+
+/// Restore the Calculator frame's keyboard target when the user clicks back
+/// from another top-level window. Limiting this to WA_CLICKACTIVE deliberately
+/// avoids stealing a child edit control's focus on Alt-Tab activation.
+pub fn install_click_activation_focus_recovery(hwnd: *mut c_void) {
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        let _ = SetWindowSubclass(
+            hwnd as Hwnd,
+            Some(click_activation_focus_proc),
+            CLICK_ACTIVATION_FOCUS_SUBCLASS_ID,
+            0,
+        );
+    }
+}
+
+thread_local! {
+    // Scoped to the native message currently being dispatched to wx. Keeping
+    // the original VK/scan pair avoids guessing OEM keys from wx key codes.
+    static CURRENT_KEYDOWN: std::cell::Cell<Option<(u32, u32)>> = const { std::cell::Cell::new(None) };
+}
+
+unsafe extern "system" fn keydown_translation_proc(
+    hwnd: Hwnd, message: Uint, wparam: usize, lparam: isize,
+    _id: usize, _ref_data: usize,
+) -> isize {
+    if message == 0x0087 && matches!(wparam, 13 | 27) {
+        // WM_GETDLGCODE: Enter/Escape are calculator shortcuts. Prevent
+        // dialog navigation from invoking the focused/default button before
+        // its KEY_DOWN handler gets a chance to resolve the configured key.
+        return DefSubclassProc(hwnd, message, wparam, lparam) | 0x0004;
+    }
+    if message == WM_KEYDOWN {
+        return CURRENT_KEYDOWN.with(|current| {
+            let previous = current.replace(Some((wparam as u32, ((lparam as usize >> 16) & 0xff) as u32)));
+            let result = DefSubclassProc(hwnd, message, wparam, lparam);
+            current.set(previous);
+            result
+        });
+    }
+    if message == WM_NCDESTROY {
+        let _ = RemoveWindowSubclass(hwnd, Some(keydown_translation_proc), KEYDOWN_TRANSLATION_SUBCLASS_ID);
+    }
+    DefSubclassProc(hwnd, message, wparam, lparam)
+}
+
+pub fn install_keydown_translation(hwnd: *mut c_void) {
+    if !hwnd.is_null() {
+        unsafe { SetWindowSubclass(hwnd as Hwnd, Some(keydown_translation_proc), KEYDOWN_TRANSLATION_SUBCLASS_ID, 0); }
+    }
+}
+
+/// Translate the current key without waiting for wxEVT_CHAR, which native
+/// buttons may suppress. Flag 4 leaves Windows' dead-key state untouched.
+pub fn keydown_character() -> Option<char> {
+    let (key, scan) = CURRENT_KEYDOWN.with(|current| current.get())?;
+    unsafe {
+        let mut state = [0u8; 256];
+        if GetKeyboardState(state.as_mut_ptr()) == 0 { return None; }
+        // Ctrl is part of the shortcut chord, not a request for a control
+        // character. Alt/AltGr are excluded by the caller.
+        for index in [0x11, 0xa2, 0xa3] { state[index] = 0; }
+        let mut text = [0u16; 4];
+        let count = ToUnicodeEx(key, scan, state.as_ptr(), text.as_mut_ptr(), text.len() as i32, 4, GetKeyboardLayout(0));
+        if count != 1 { return None; }
+        char::from_u32(text[0] as u32).filter(|ch| !ch.is_control())
     }
 }
 

@@ -1,0 +1,29 @@
+OpenCalc v1.1.10 buildfix139
+
+Fix
+Returning from Help Topics can focus a native calculator button. Event tracing
+confirmed that wx delivers KEY_DOWN there without delivering CHAR. Buildfix138
+waited for CHAR for printable shortcuts, so focus recovery alone did not fix it.
+
+Calculator shortcuts now resolve once on KEY_DOWN. A scoped native message
+subclass supplies the original virtual key and scan code to ToUnicodeEx for
+keyboard-layout translation without modifying Windows' dead-key state. Enter
+and Escape request dialog-key delivery so the default/focused button cannot
+consume them before the configured calculator shortcut is resolved.
+
+Display selection and graph editing retain their native input handling. The
+temporary diagnostic logging has been removed. Linux is unchanged.
+
+Validation on Windows
+- Reproduced buildfix138: after menu-launched Help closed, Back had focus;
+  digit KEY_DOWN arrived, CHAR did not, and the display did not change.
+- Fixed build: while Help remained open, returning/clicking Calculator and
+  pressing 8 changed 7 to 78 with Back focused.
+- After Help closed, pressing 9 changed 78 to 789 with Back focused.
+- Repeated menu Help open/close: 7, shifted +, numpad 1, Enter produced 8
+  and a single 7 + 1 = 8 history entry, still with Back focused.
+- Ctrl+Z restored 1; Ctrl+Y restored 8. Display Ctrl+A selected its text.
+- cargo test --locked: 77 passed, zero failed.
+- cargo build --release --locked: passed.
+
+Extract the complete Windows package before launching OpenCalc.exe.
